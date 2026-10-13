@@ -16,7 +16,8 @@ import { NotificationService } from './notification.service';
   `,
   styles: `
     .toasts {
-      position: fixed; z-index: 1000; left: 50%; bottom: 24px; transform: translateX(-50%);
+      /* Top of the screen, so toasts never cover the message composer. */
+      position: fixed; z-index: 1000; left: 50%; top: 16px; transform: translateX(-50%);
       display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px));
     }
     .toast {
@@ -29,7 +30,7 @@ import { NotificationService } from './notification.service';
     .toast.info { border-left: 4px solid var(--accent); }
     .message { flex: 1; font-size: 0.9375rem; }
     .close { border: 0; background: none; color: var(--text-muted); font-size: 1.25rem; line-height: 1; cursor: pointer; padding: 0 2px; }
-    @keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @keyframes enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
   `,
 })
