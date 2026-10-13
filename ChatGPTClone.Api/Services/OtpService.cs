@@ -32,7 +32,7 @@ public sealed class OtpService(
             if (explicitResend)
             {
                 throw new ApiException(StatusCodes.Status429TooManyRequests, "Please wait before requesting a new code",
-                    $"You can request a new code in {cooldownRemaining} seconds.",
+                    $"You can request a new code in {FormatWait(cooldownRemaining)}.",
                     new Dictionary<string, object?> { ["retryAfterSeconds"] = cooldownRemaining });
             }
 
@@ -49,8 +49,19 @@ public sealed class OtpService(
         if (recent.Count >= _options.MaxSendsPerHour)
         {
             var retryAfter = Math.Max(1, SecondsUntil(recent[0].AddHours(1), now));
+
+            // On sign-in, a still-valid code already in the inbox is better than a hard stop.
+            if (!explicitResend)
+            {
+                var active = await otpRepository.GetLatestActiveAsync(user.UserId, now, cancellationToken);
+                if (active is not null)
+                {
+                    return new OtpIssueResult(false, SecondsUntil(active.ExpiresAt, now), retryAfter);
+                }
+            }
+
             throw new ApiException(StatusCodes.Status429TooManyRequests, "Too many codes requested",
-                $"You have requested too many codes. Please try again in {Math.Ceiling(retryAfter / 60.0)} minutes.",
+                $"You have requested too many codes. Please try again in {FormatWait(retryAfter)}.",
                 new Dictionary<string, object?> { ["retryAfterSeconds"] = retryAfter });
         }
 
@@ -144,6 +155,18 @@ public sealed class OtpService(
         new(StatusCodes.Status400BadRequest, "Too many incorrect attempts",
             "This code is no longer valid because of too many incorrect attempts. Please request a new code.",
             new Dictionary<string, object?> { ["reason"] = "too_many_attempts", ["attemptsRemaining"] = 0 });
+
+    /// <summary>"45 seconds", "1 minute", "12 minutes".</summary>
+    internal static string FormatWait(int seconds)
+    {
+        if (seconds < 60)
+        {
+            return seconds == 1 ? "1 second" : $"{seconds} seconds";
+        }
+
+        var minutes = (int)Math.Ceiling(seconds / 60.0);
+        return minutes == 1 ? "1 minute" : $"{minutes} minutes";
+    }
 
     private static int SecondsUntil(DateTime targetUtc, DateTime nowUtc) =>
         Math.Max(0, (int)Math.Ceiling((targetUtc - nowUtc).TotalSeconds));
