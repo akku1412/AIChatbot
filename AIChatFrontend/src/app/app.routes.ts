@@ -13,7 +13,8 @@ export const routes: Routes = [
   {
     path: 'verify-otp',
     title: 'Verify your email · AIChat',
-    canActivate: [guestGuard, otpChallengeGuard],
+    // No guestGuard: a pending challenge already means the user is mid sign-in, so skip the refresh probe.
+    canActivate: [otpChallengeGuard],
     loadComponent: () =>
       import('./features/otp-verification/otp-verification').then((m) => m.OtpVerification),
   },
