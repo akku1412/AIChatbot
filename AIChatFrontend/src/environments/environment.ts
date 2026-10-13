@@ -3,6 +3,6 @@
 export const environment = {
   production: true,
   apiBaseUrl: '/api',
-  // Google OAuth Web Client ID (public by design). Set in Phase 4.
-  googleClientId: '',
+  // Google OAuth Web Client ID (public by design, not a secret).
+  googleClientId: '901002317723-lk58p7huv06km29lnstieu4a8rbln0ok.apps.googleusercontent.com',
 };

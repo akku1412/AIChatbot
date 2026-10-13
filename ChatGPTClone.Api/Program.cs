@@ -1,8 +1,15 @@
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using ChatGPTClone.Api.Authentication;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data;
+using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Middleware;
+using ChatGPTClone.Api.Repositories;
+using ChatGPTClone.Api.Services;
+using ChatGPTClone.Api.Validators;
+using FluentValidation;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
@@ -27,9 +34,42 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         sql.EnableRetryOnFailure(maxRetryCount: 3);
     }));
 
+// ---------- Options (validated at startup so missing secrets fail fast with a clear message) ----------
+builder.Services.AddOptions<GoogleAuthOptions>()
+    .Bind(builder.Configuration.GetSection(GoogleAuthOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<SmtpOptions>()
+    .Bind(builder.Configuration.GetSection(SmtpOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<OtpOptions>()
+    .Bind(builder.Configuration.GetSection(OtpOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+
+// ---------- Application services ----------
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddDataProtection().SetApplicationName("ChatGPTClone");
+
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IOtpRepository, OtpRepository>();
+
+builder.Services.AddSingleton<IGoogleTokenValidator, GoogleTokenValidator>();
+builder.Services.AddSingleton<IOtpChallengeProtector, OtpChallengeProtector>();
+builder.Services.AddSingleton<IOtpHasher, OtpHasher>();
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<IOtpService, OtpService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
 // ---------- Controllers & JSON ----------
 builder.Services
-    .AddControllers()
+    .AddControllers(o =>
+    {
+        // FluentValidation owns request validation (Validators/), so MVC's implicit
+        // "non-nullable means required" rule does not produce duplicate messages.
+        o.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
+        o.Filters.Add<FluentValidationFilter>();
+    })
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // ---------- Error handling (RFC 7807 ProblemDetails) ----------
@@ -45,10 +85,19 @@ builder.Services.AddCors(o => o.AddPolicy(CorsSettings.PolicyName, policy =>
           .AllowAnyHeader()
           .AllowAnyMethod()));
 
-// ---------- Rate limiting (global per-IP; stricter auth/OTP policies are added in Phase 4) ----------
+// ---------- Rate limiting (global per-IP, plus a stricter per-IP policy on auth/OTP endpoints) ----------
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy(RateLimitPolicies.Auth, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",

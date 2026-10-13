@@ -5,8 +5,9 @@ namespace ChatGPTClone.Api.Middleware;
 
 /// <summary>
 /// Turns any unhandled exception into an RFC 7807 ProblemDetails response.
-/// Clients never see stack traces or exception messages; the server log gets the
-/// exception plus a trace id so a user-reported error can be matched to the log entry.
+/// ApiException carries a safe, user-facing status and message. Anything else becomes a generic 500:
+/// clients never see stack traces or exception messages; the server log gets the exception plus a
+/// trace id so a user-reported error can be matched to the log entry.
 /// </summary>
 public sealed class GlobalExceptionHandler(
     ILogger<GlobalExceptionHandler> logger,
@@ -24,21 +25,48 @@ public sealed class GlobalExceptionHandler(
             return true;
         }
 
-        logger.LogError(exception, "Unhandled exception for {Method} {Path}",
-            httpContext.Request.Method, httpContext.Request.Path);
+        ProblemDetails problem;
+        if (exception is ApiException apiException)
+        {
+            logger.LogInformation("Request {Method} {Path} failed with {StatusCode}: {Title}",
+                httpContext.Request.Method, httpContext.Request.Path, apiException.StatusCode, apiException.Title);
 
-        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            problem = new ProblemDetails
+            {
+                Status = apiException.StatusCode,
+                Title = apiException.Title,
+                Detail = apiException.Message,
+            };
+            foreach (var (key, value) in apiException.Extensions)
+            {
+                problem.Extensions[key] = value;
+            }
+
+            if (apiException.Extensions.TryGetValue("retryAfterSeconds", out var retryAfter) && retryAfter is not null)
+            {
+                httpContext.Response.Headers.RetryAfter = retryAfter.ToString();
+            }
+        }
+        else
+        {
+            logger.LogError(exception, "Unhandled exception for {Method} {Path}",
+                httpContext.Request.Method, httpContext.Request.Path);
+
+            problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status500InternalServerError,
+                Title = "Something went wrong",
+                Detail = "An unexpected error occurred. Please try again later.",
+            };
+        }
+
+        httpContext.Response.StatusCode = problem.Status!.Value;
 
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
             Exception = exception,
-            ProblemDetails = new ProblemDetails
-            {
-                Status = StatusCodes.Status500InternalServerError,
-                Title = "Something went wrong",
-                Detail = "An unexpected error occurred. Please try again later.",
-            },
+            ProblemDetails = problem,
         });
     }
 }
