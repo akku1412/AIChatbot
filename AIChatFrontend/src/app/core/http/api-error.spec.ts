@@ -39,6 +39,14 @@ describe('toApiProblem / errorMessage', () => {
     expect(errorMessage(err)).toBe('The code must be exactly 6 digits.');
   });
 
+  it('keeps API ProblemDetails even on 502-504 (AI provider errors)', () => {
+    const err = new HttpErrorResponse({
+      status: 504,
+      error: { title: 'AI took too long', detail: 'The AI took too long to respond.', reason: 'ai_timeout' },
+    });
+    expect(errorMessage(err)).toBe('The AI took too long to respond.');
+  });
+
   it('maps network and gateway failures to a connection message', () => {
     expect(toApiProblem(new HttpErrorResponse({ status: 0 })).title).toBe('Connection problem');
     expect(toApiProblem(new HttpErrorResponse({ status: 504, error: 'proxy error' })).title).toBe('Connection problem');

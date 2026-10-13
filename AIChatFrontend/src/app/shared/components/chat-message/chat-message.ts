@@ -1,21 +1,27 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
 
 import { ChatMessage } from '../../../core/models/chat.models';
+import { MarkdownView } from '../markdown/markdown';
 import { NotificationService } from '../toast/notification.service';
 
 /**
- * One message. User messages are right-aligned bubbles; assistant messages are full-width text with
- * a Copy button. Content is rendered as plain text here; Phase 8 switches assistant replies to safe Markdown.
+ * One message. User messages are right-aligned plain-text bubbles; assistant messages are full-width,
+ * rendered as sanitized Markdown, with a Copy button for the whole reply.
  */
 @Component({
   selector: 'app-chat-message',
+  imports: [MarkdownView],
   template: `
     <article class="message" [class.user]="isUser()" [class.assistant]="!isUser()" [attr.aria-label]="isUser() ? 'You said' : 'AIChat replied'">
       @if (!isUser()) {
         <div class="avatar" aria-hidden="true">AI</div>
       }
       <div class="body">
-        <div class="content">{{ message().content }}</div>
+        @if (isUser()) {
+          <div class="content">{{ message().content }}</div>
+        } @else {
+          <app-markdown [content]="message().content" />
+        }
         @if (!isUser()) {
           <div class="actions">
             <button type="button" class="action" (click)="copy()" [attr.aria-label]="copied() ? 'Copied' : 'Copy response'">

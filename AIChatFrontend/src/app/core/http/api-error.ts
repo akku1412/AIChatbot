@@ -16,14 +16,15 @@ export function toApiProblem(error: unknown): ResolvedProblem {
     return { status: -1, title: 'Something went wrong', detail: 'Please try again.' };
   }
 
-  // 0 = network/CORS failure; 502-504 = the dev proxy or a gateway could not reach the API.
-  if (error.status === 0 || (error.status >= 502 && error.status <= 504)) {
-    return { ...NETWORK_PROBLEM, status: error.status };
+  const body = error.error;
+  // The API's own ProblemDetails (including AI errors sent as 502/503/504) always wins.
+  if (body && typeof body === 'object' && ('title' in body || 'detail' in body || 'errors' in body)) {
+    return { ...(body as ApiProblem), status: error.status };
   }
 
-  const body = error.error;
-  if (body && typeof body === 'object') {
-    return { ...(body as ApiProblem), status: error.status };
+  // 0 = network/CORS failure; a bare 502-504 = the dev proxy or a gateway could not reach the API.
+  if (error.status === 0 || (error.status >= 502 && error.status <= 504)) {
+    return { ...NETWORK_PROBLEM, status: error.status };
   }
 
   return { status: error.status, title: 'Something went wrong', detail: 'Please try again in a moment.' };

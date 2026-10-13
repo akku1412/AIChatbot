@@ -7,6 +7,7 @@ using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Repositories;
 using ChatGPTClone.Api.Services;
+using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Validators;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -50,6 +51,11 @@ builder.Services.AddOptions<OtpOptions>()
 builder.Services.AddOptions<JwtOptions>()
     .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
     .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<AiOptions>()
+    .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(o => !string.IsNullOrWhiteSpace(o.OpenAI.Model), "Ai:OpenAI:Model is required.")
+    .ValidateOnStart();
 
 // ---------- Authentication (JWT bearer) & authorization (signed-in by default) ----------
 var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
@@ -96,6 +102,22 @@ builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
+builder.Services.AddScoped<IConversationRepository, ConversationRepository>();
+builder.Services.AddScoped<IMessageRepository, MessageRepository>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IChatService, ChatService>();
+
+// AI provider is chosen by configuration ("Ai:Provider"); add a case here to plug in another vendor.
+var aiProvider = builder.Configuration[$"{AiOptions.SectionName}:Provider"] ?? "OpenAI";
+switch (aiProvider)
+{
+    case "OpenAI":
+        builder.Services.AddSingleton<IAiChatProvider, OpenAiChatProvider>();
+        break;
+    default:
+        throw new InvalidOperationException($"Unknown Ai:Provider '{aiProvider}'. Supported: OpenAI.");
+}
+
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // ---------- Controllers & JSON ----------
@@ -132,6 +154,16 @@ builder.Services.AddRateLimiter(o =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+    // AI calls cost money: limit per signed-in user (falls back to IP), not just per IP.
+    o.AddPolicy(RateLimitPolicies.AiChat, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));
@@ -194,8 +226,8 @@ else
 
 app.UseHttpsRedirection();
 app.UseCors(CorsSettings.PolicyName);
+app.UseAuthentication(); // before the rate limiter, so per-user policies can see the user
 app.UseRateLimiter();
-app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
