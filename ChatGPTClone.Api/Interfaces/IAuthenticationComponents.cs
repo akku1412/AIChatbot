@@ -1,6 +1,28 @@
 using ChatGPTClone.Api.Authentication;
+using ChatGPTClone.Api.Models;
 
 namespace ChatGPTClone.Api.Interfaces;
+
+public sealed record AccessToken(string Token, DateTime ExpiresAt);
+
+public interface ITokenService
+{
+    AccessToken CreateAccessToken(User user);
+}
+
+public sealed record IssuedRefreshToken(string Token, DateTime ExpiresAt);
+
+public sealed record RotatedRefreshToken(User User, IssuedRefreshToken Next);
+
+public interface IRefreshTokenService
+{
+    Task<IssuedRefreshToken> IssueAsync(int userId, CancellationToken cancellationToken);
+
+    /// <summary>Revokes the presented token and issues its replacement; null when it is unknown, expired or revoked.</summary>
+    Task<RotatedRefreshToken?> RotateAsync(string rawToken, CancellationToken cancellationToken);
+
+    Task RevokeAsync(string rawToken, CancellationToken cancellationToken);
+}
 
 public interface IGoogleTokenValidator
 {

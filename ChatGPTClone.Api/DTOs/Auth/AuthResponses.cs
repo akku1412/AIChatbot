@@ -13,5 +13,8 @@ public sealed record OtpChallengeResponse(
     int ExpiresInSeconds,
     int ResendAvailableInSeconds);
 
-/// <summary>Phase 4 result. Phase 5 adds the access token (and refresh cookie) here.</summary>
-public sealed record VerifyOtpResponse(bool Verified, UserDto User);
+/// <summary>
+/// Returned by verify-otp and refresh. The refresh token is NOT in the body: it is set as an HttpOnly cookie.
+/// Keep the access token in memory only (never localStorage).
+/// </summary>
+public sealed record AuthResponse(string AccessToken, DateTime AccessTokenExpiresAt, UserDto User);

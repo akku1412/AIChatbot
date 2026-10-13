@@ -1,4 +1,5 @@
 using ChatGPTClone.Api.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ChatGPTClone.Api.Controllers;
@@ -6,6 +7,7 @@ namespace ChatGPTClone.Api.Controllers;
 /// <summary>Liveness check used to confirm the API and its database are reachable (e.g. from Angular or Swagger).</summary>
 [ApiController]
 [Route("api/[controller]")]
+[AllowAnonymous]
 public sealed class HealthController(IWebHostEnvironment environment, AppDbContext db) : ControllerBase
 {
     [HttpGet]

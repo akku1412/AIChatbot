@@ -9,8 +9,11 @@ using ChatGPTClone.Api.Repositories;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Validators;
 using FluentValidation;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
@@ -44,6 +47,35 @@ builder.Services.AddOptions<SmtpOptions>()
 builder.Services.AddOptions<OtpOptions>()
     .Bind(builder.Configuration.GetSection(OtpOptions.SectionName))
     .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+
+// ---------- Authentication (JWT bearer) & authorization (signed-in by default) ----------
+var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(o =>
+    {
+        o.MapInboundClaims = false; // keep "sub", "email", "name" as issued
+        o.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwt.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwt.Audience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = string.IsNullOrEmpty(jwt.SigningKey) ? null : JwtSigningKey.Create(jwt.SigningKey),
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+            ClockSkew = TimeSpan.FromSeconds(30),
+            NameClaimType = "name",
+        };
+    });
+
+// Every endpoint requires a valid access token unless it is explicitly marked [AllowAnonymous].
+builder.Services.AddAuthorizationBuilder()
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
 // ---------- Application services ----------
 builder.Services.AddSingleton(TimeProvider.System);
@@ -51,6 +83,11 @@ builder.Services.AddDataProtection().SetApplicationName("ChatGPTClone");
 
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IOtpRepository, OtpRepository>();
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+
+builder.Services.AddSingleton<ITokenService, TokenService>();
+builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
+builder.Services.AddScoped<IUserService, UserService>();
 
 builder.Services.AddSingleton<IGoogleTokenValidator, GoogleTokenValidator>();
 builder.Services.AddSingleton<IOtpChallengeProtector, OtpChallengeProtector>();
@@ -158,7 +195,7 @@ else
 app.UseHttpsRedirection();
 app.UseCors(CorsSettings.PolicyName);
 app.UseRateLimiter();
-// UseAuthentication() is added in Phase 5.
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

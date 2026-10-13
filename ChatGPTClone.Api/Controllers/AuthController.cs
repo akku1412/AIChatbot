@@ -1,6 +1,9 @@
+using ChatGPTClone.Api.Authentication;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.DTOs.Auth;
 using ChatGPTClone.Api.Interfaces;
+using ChatGPTClone.Api.Middleware;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -8,6 +11,7 @@ namespace ChatGPTClone.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+[AllowAnonymous]
 [EnableRateLimiting(RateLimitPolicies.Auth)]
 [Produces("application/json")]
 public sealed class AuthController(IAuthService authService) : ControllerBase
@@ -33,11 +37,53 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     public async Task<ActionResult<OtpChallengeResponse>> SendOtp(SendOtpRequest request, CancellationToken cancellationToken) =>
         Ok(await authService.ResendOtpAsync(request.ChallengeToken, cancellationToken));
 
-    /// <summary>Step 2: check the code. Single-use, expires after 5 minutes, limited attempts.</summary>
+    /// <summary>
+    /// Step 2: check the code. On success returns the access token and sets the HttpOnly refresh cookie.
+    /// This is the only endpoint that starts a session.
+    /// </summary>
     [HttpPost("verify-otp")]
-    [ProducesResponseType(typeof(VerifyOtpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<VerifyOtpResponse>> VerifyOtp(VerifyOtpRequest request, CancellationToken cancellationToken) =>
-        Ok(await authService.VerifyOtpAsync(request.ChallengeToken, request.Code, cancellationToken));
+    public async Task<ActionResult<AuthResponse>> VerifyOtp(VerifyOtpRequest request, CancellationToken cancellationToken)
+    {
+        var session = await authService.VerifyOtpAsync(request.ChallengeToken, request.Code, cancellationToken);
+        RefreshTokenCookie.Write(Response, session.RefreshToken);
+        return Ok(session.Response);
+    }
+
+    /// <summary>Exchanges the refresh cookie for a new access token (and a rotated cookie).</summary>
+    [HttpPost("refresh")]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> Refresh(CancellationToken cancellationToken)
+    {
+        var refreshToken = RefreshTokenCookie.Read(Request);
+        if (refreshToken is null)
+        {
+            throw new ApiException(StatusCodes.Status401Unauthorized, "Not signed in", "Please sign in.");
+        }
+
+        try
+        {
+            var session = await authService.RefreshAsync(refreshToken, cancellationToken);
+            RefreshTokenCookie.Write(Response, session.RefreshToken);
+            return Ok(session.Response);
+        }
+        catch (ApiException)
+        {
+            RefreshTokenCookie.Clear(Response);
+            throw;
+        }
+    }
+
+    /// <summary>Revokes the refresh token and clears the cookie. Works even if the access token has expired.</summary>
+    [HttpPost("logout")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> Logout(CancellationToken cancellationToken)
+    {
+        await authService.LogoutAsync(RefreshTokenCookie.Read(Request), cancellationToken);
+        RefreshTokenCookie.Clear(Response);
+        return NoContent();
+    }
 }

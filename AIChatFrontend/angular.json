@@ -81,7 +81,8 @@
               "buildTarget": "AIChatFrontend:build:production"
             },
             "development": {
-              "buildTarget": "AIChatFrontend:build:development"
+              "buildTarget": "AIChatFrontend:build:development",
+              "proxyConfig": "proxy.conf.json"
             }
           },
           "defaultConfiguration": "development"

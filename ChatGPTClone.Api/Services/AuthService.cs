@@ -18,6 +18,8 @@ public sealed class AuthService(
     IUserRepository userRepository,
     IOtpService otpService,
     IOtpChallengeProtector challengeProtector,
+    ITokenService tokenService,
+    IRefreshTokenService refreshTokenService,
     ILogger<AuthService> logger) : IAuthService
 {
     public async Task<OtpChallengeResponse> SignInWithGoogleAsync(string idToken, CancellationToken cancellationToken)
@@ -40,7 +42,7 @@ public sealed class AuthService(
         return ToChallengeResponse(user, issue);
     }
 
-    public async Task<VerifyOtpResponse> VerifyOtpAsync(string challengeToken, string code, CancellationToken cancellationToken)
+    public async Task<AuthSession> VerifyOtpAsync(string challengeToken, string code, CancellationToken cancellationToken)
     {
         var user = await GetChallengedUserAsync(challengeToken, cancellationToken);
         await otpService.VerifyAsync(user, code, cancellationToken);
@@ -51,8 +53,44 @@ public sealed class AuthService(
             await userRepository.SaveChangesAsync(cancellationToken);
         }
 
-        // Phase 5: issue the access token + refresh-token cookie here, and only here.
-        return new VerifyOtpResponse(true, UserDto.From(user));
+        // OTP passed: this is the only point where an application session is created.
+        var refreshToken = await refreshTokenService.IssueAsync(user.UserId, cancellationToken);
+        logger.LogInformation("User {UserId} signed in", user.UserId);
+
+        return CreateSession(user, refreshToken);
+    }
+
+    public async Task<AuthSession> RefreshAsync(string refreshToken, CancellationToken cancellationToken)
+    {
+        var rotated = await refreshTokenService.RotateAsync(refreshToken, cancellationToken)
+            ?? throw new ApiException(StatusCodes.Status401Unauthorized, "Session expired",
+                "Your session has expired. Please sign in again.");
+
+        // A user who never completed OTP must not get a session, even with a token.
+        if (!rotated.User.IsEmailVerified)
+        {
+            await refreshTokenService.RevokeAsync(rotated.Next.Token, cancellationToken);
+            throw new ApiException(StatusCodes.Status401Unauthorized, "Session expired",
+                "Please sign in again and verify your email.");
+        }
+
+        return CreateSession(rotated.User, rotated.Next);
+    }
+
+    public async Task LogoutAsync(string? refreshToken, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(refreshToken))
+        {
+            await refreshTokenService.RevokeAsync(refreshToken, cancellationToken);
+        }
+    }
+
+    private AuthSession CreateSession(User user, IssuedRefreshToken refreshToken)
+    {
+        var accessToken = tokenService.CreateAccessToken(user);
+        return new AuthSession(
+            new AuthResponse(accessToken.Token, accessToken.ExpiresAt, UserDto.From(user)),
+            refreshToken);
     }
 
     private async Task<User> UpsertUserAsync(GoogleIdentity identity, CancellationToken cancellationToken)

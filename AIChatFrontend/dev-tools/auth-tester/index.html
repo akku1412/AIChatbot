@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Auth Tester (dev only)</title>
   <!--
-    DEV-ONLY tool for testing Phase 4 (Google sign-in + email OTP) before the Angular pages exist.
-    Served by the Angular dev server (development configuration only):
+    DEV-ONLY tool for testing Phases 4-5 (Google sign-in, email OTP, JWT + refresh cookie) before the
+    Angular login/OTP pages exist. Served by the Angular dev server (development configuration only):
       ng serve, then open http://localhost:4200/dev/auth-tester/index.html
+    Calls go to /api, which proxy.conf.json forwards to the API (same origin, so the refresh cookie works).
     Not part of the application and never deployed.
   -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -20,7 +21,7 @@
     h1 { font-size:1.25rem; margin:0 0 4px; } h2 { font-size:1rem; margin:0 0 12px; }
     .muted { color:var(--muted); font-size:.875rem; }
     input { font:inherit; font-size:1.5rem; letter-spacing:6px; width:9ch; padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:transparent; color:inherit; }
-    button { font:inherit; padding:8px 16px; margin:8px 8px 0 0; border:1px solid var(--border); border-radius:8px; background:transparent; color:inherit; cursor:pointer; }
+    button, a.button { display:inline-block; font:inherit; padding:8px 16px; margin:8px 8px 0 0; border:1px solid var(--border); border-radius:8px; background:transparent; color:inherit; cursor:pointer; text-decoration:none; }
     button:disabled { opacity:.5; cursor:not-allowed; }
     pre { white-space:pre-wrap; word-break:break-word; font-size:.8125rem; padding:12px; border-radius:8px; border:1px solid var(--border); }
     .ok { color:var(--ok); } .err { color:var(--err); }
@@ -29,8 +30,8 @@
 <body>
 <main>
   <section>
-    <h1>Auth Tester <span class="muted">(dev only, Phase 4)</span></h1>
-    <p class="muted">API: <span id="api"></span></p>
+    <h1>Auth Tester <span class="muted">(dev only, Phases 4-5)</span></h1>
+    <p class="muted">API: <span id="api"></span> (proxied to https://localhost:7180)</p>
     <h2>1. Sign in with Google</h2>
     <div id="google-button"></div>
   </section>
@@ -46,6 +47,16 @@
   </section>
 
   <section>
+    <h2>3. Session (Phase 5)</h2>
+    <p class="muted" id="session-state">No access token in memory.</p>
+    <button id="me">GET /users/me</button>
+    <button id="me-no-token">GET /users/me without token</button>
+    <button id="refresh">POST /auth/refresh</button>
+    <button id="logout">POST /auth/logout</button>
+    <a class="button" href="/chat">Open protected /chat page</a>
+  </section>
+
+  <section>
     <h2>Last API response</h2>
     <p id="status" class="muted">Nothing yet.</p>
     <pre id="output">-</pre>
@@ -53,30 +64,48 @@
 </main>
 
 <script>
-  const API = 'https://localhost:7180/api/auth';
+  const API = '/api';
   const CLIENT_ID = '901002317723-lk58p7huv06km29lnstieu4a8rbln0ok.apps.googleusercontent.com';
   document.getElementById('api').textContent = API;
 
   let challengeToken = null;   // kept in memory only
+  let accessToken = null;      // kept in memory only
   let resendAt = 0, expiresAt = 0;
 
-  async function call(path, body) {
+  function show(method, path, res, data) {
     const status = document.getElementById('status');
-    status.className = 'muted'; status.textContent = 'Calling ' + path + ' ...';
+    status.className = res.ok ? 'ok' : 'err';
+    status.textContent = method + ' ' + path + ' -> HTTP ' + res.status;
+    // Never echo secrets back to the screen.
+    const shown = data && typeof data === 'object' ? { ...data } : data;
+    if (shown && shown.challengeToken) shown.challengeToken = '(hidden, ' + shown.challengeToken.length + ' chars)';
+    if (shown && shown.accessToken) shown.accessToken = '(hidden JWT, ' + shown.accessToken.length + ' chars)';
+    document.getElementById('output').textContent = shown === undefined ? '(no body)' : JSON.stringify(shown, null, 2);
+  }
+
+  async function call(method, path, body, token) {
+    const status = document.getElementById('status');
+    status.className = 'muted'; status.textContent = 'Calling ' + method + ' ' + path + ' ...';
     try {
-      const res = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const data = await res.json().catch(() => ({}));
-      status.className = res.ok ? 'ok' : 'err';
-      status.textContent = 'POST ' + path + ' -> HTTP ' + res.status;
-      // Never echo the challenge token back to the screen.
-      const shown = { ...data }; if (shown.challengeToken) shown.challengeToken = '(hidden, ' + shown.challengeToken.length + ' chars)';
-      document.getElementById('output').textContent = JSON.stringify(shown, null, 2);
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = 'Bearer ' + token;
+      const res = await fetch(API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      const text = await res.text();
+      let data; try { data = text ? JSON.parse(text) : undefined; } catch { data = text; }
+      show(method, path, res, data);
       return { ok: res.ok, data };
     } catch (e) {
       status.className = 'err';
       status.textContent = 'Network error: is the API running on https://localhost:7180? (' + e.message + ')';
       return { ok: false, data: null };
     }
+  }
+
+  function setToken(token, exp) {
+    accessToken = token;
+    document.getElementById('session-state').textContent = token
+      ? 'Access token in memory, expires ' + new Date(exp).toLocaleTimeString() + '. Refresh token is in an HttpOnly cookie (not visible to JavaScript: document.cookie = "' + document.cookie + '").'
+      : 'No access token in memory.';
   }
 
   function applyChallenge(data) {
@@ -99,19 +128,34 @@
   }, 500);
 
   async function onGoogleCredential(response) {
-    const { ok, data } = await call('/google', { idToken: response.credential });
+    const { ok, data } = await call('POST', '/auth/google', { idToken: response.credential });
     if (ok) applyChallenge(data);
   }
 
   document.getElementById('verify').onclick = async () => {
     const code = document.getElementById('code').value.trim();
-    const { ok } = await call('/verify-otp', { challengeToken, code });
-    if (ok) { document.getElementById('otp-section').hidden = true; challengeToken = null; }
+    const { ok, data } = await call('POST', '/auth/verify-otp', { challengeToken, code });
+    if (ok) {
+      document.getElementById('otp-section').hidden = true;
+      challengeToken = null;
+      setToken(data.accessToken, data.accessTokenExpiresAt);
+    }
   };
 
   document.getElementById('resend').onclick = async () => {
-    const { ok, data } = await call('/send-otp', { challengeToken });
+    const { ok, data } = await call('POST', '/auth/send-otp', { challengeToken });
     if (ok) applyChallenge(data);
+  };
+
+  document.getElementById('me').onclick = () => call('GET', '/users/me', undefined, accessToken);
+  document.getElementById('me-no-token').onclick = () => call('GET', '/users/me');
+  document.getElementById('refresh').onclick = async () => {
+    const { ok, data } = await call('POST', '/auth/refresh', {});
+    setToken(ok ? data.accessToken : null, ok ? data.accessTokenExpiresAt : 0);
+  };
+  document.getElementById('logout').onclick = async () => {
+    await call('POST', '/auth/logout', {});
+    setToken(null, 0);
   };
 
   window.onload = () => {
