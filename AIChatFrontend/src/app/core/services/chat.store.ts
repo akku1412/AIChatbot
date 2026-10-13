@@ -134,10 +134,12 @@ export class ChatStore {
     this.sending.set(true);
 
     const existingId = this.activeConversationId();
+    let createdId: number | null = null;
     const conversationId$ = existingId
       ? of(existingId)
       : this.api.createConversation().pipe(
           tap((conversation) => {
+            createdId = conversation.conversationId;
             this.conversationList.update((list) => [conversation, ...list]);
             this.activeConversationId.set(conversation.conversationId);
           }),
@@ -164,9 +166,28 @@ export class ChatStore {
           map(() => conversationId),
         ),
       ),
-      tap({ error: () => this.messages.update((list) => list.filter((m) => m.messageId !== optimistic.messageId)) }),
+      tap({
+        error: () => {
+          this.messages.update((list) => list.filter((m) => m.messageId !== optimistic.messageId));
+          if (createdId !== null) {
+            this.discardEmptyConversation(createdId);
+          }
+        },
+      }),
       finalize(() => this.sending.set(false)),
     );
+  }
+
+  /**
+   * The first message of a new chat failed (e.g. the AI is unavailable), so the conversation created
+   * for it has no messages: remove it instead of leaving an empty "New chat" in the sidebar.
+   */
+  private discardEmptyConversation(conversationId: number): void {
+    this.conversationList.update((list) => list.filter((c) => c.conversationId !== conversationId));
+    if (this.activeConversationId() === conversationId) {
+      this.activeConversationId.set(null);
+    }
+    this.api.deleteConversation(conversationId).subscribe({ error: () => undefined });
   }
 
   /** Called on logout so the next user never sees the previous user's data. */
