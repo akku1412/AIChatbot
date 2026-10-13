@@ -58,6 +58,17 @@
                   "replace": "src/environments/environment.ts",
                   "with": "src/environments/environment.development.ts"
                 }
+              ],
+              "assets": [
+                {
+                  "glob": "**/*",
+                  "input": "public"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "dev-tools/auth-tester",
+                  "output": "dev/auth-tester"
+                }
               ]
             }
           },
