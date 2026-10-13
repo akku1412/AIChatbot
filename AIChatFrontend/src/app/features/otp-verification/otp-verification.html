@@ -1,0 +1,67 @@
+<main class="auth-page">
+  <section class="card" aria-labelledby="otp-title">
+    <app-logo [size]="48" />
+    <h1 id="otp-title">Check your email</h1>
+
+    @if (info(); as message) {
+      <p class="subtitle" role="status">{{ message }}</p>
+    }
+
+    <form class="code-form" (ngSubmit)="verify()" novalidate>
+      <fieldset class="digits" [disabled]="verifying()">
+        <legend class="sr-only">6-digit verification code</legend>
+        @for (control of digits.controls; track $index) {
+          <input
+            #digit
+            class="digit"
+            [class.invalid]="!!error()"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="6"
+            [attr.autocomplete]="$index === 0 ? 'one-time-code' : 'off'"
+            [attr.aria-label]="'Digit ' + ($index + 1) + ' of 6'"
+            [formControl]="control"
+            (input)="onInput($index, $event)"
+            (keydown)="onKeydown($index, $event)"
+            (paste)="onPaste($index, $event)"
+          />
+        }
+      </fieldset>
+
+      @if (error(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+
+      <button type="submit" class="primary" [disabled]="verifying() || digits.invalid">
+        @if (verifying()) {
+          <app-loading-spinner [size]="16" label="Verifying" />
+          <span>Verifying…</span>
+        } @else {
+          <span>Verify and continue</span>
+        }
+      </button>
+    </form>
+
+    <p class="expiry" [class.expired]="expiresIn() === 0">
+      @if (expiresIn() > 0) {
+        Code expires in <strong>{{ expiresLabel() }}</strong>
+      } @else {
+        This code has expired. Request a new one below.
+      }
+    </p>
+
+    <div class="resend">
+      <span>Didn't get it?</span>
+      @if (resendIn() > 0) {
+        <span class="muted">Resend in {{ resendIn() }}s</span>
+      } @else {
+        <button type="button" class="link" [disabled]="resending()" (click)="resend()">
+          {{ resending() ? 'Sending…' : 'Resend code' }}
+        </button>
+      }
+    </div>
+
+    <button type="button" class="link subtle" (click)="useDifferentAccount()">Use a different Google account</button>
+  </section>
+</main>

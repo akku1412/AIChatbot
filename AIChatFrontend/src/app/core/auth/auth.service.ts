@@ -5,8 +5,14 @@ import { Observable, catchError, finalize, map, of, shareReplay, tap } from 'rxj
 
 import { environment } from '../../../environments/environment';
 import { AuthResponse, OtpChallenge, User } from './auth.models';
+import { GoogleIdentityService } from './google-identity.service';
 
 const CHALLENGE_KEY = 'aichat.otpChallenge';
+
+/** An OTP challenge plus when this browser received it, so countdowns survive a page reload. */
+export interface PendingChallenge extends OtpChallenge {
+  receivedAt: number;
+}
 
 /**
  * Session state. The access token lives in memory only (never localStorage), so a page reload
@@ -16,10 +22,11 @@ const CHALLENGE_KEY = 'aichat.otpChallenge';
 export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
+  private readonly googleIdentity = inject(GoogleIdentityService);
   private readonly baseUrl = `${environment.apiBaseUrl}/auth`;
 
   private readonly currentUser = signal<User | null>(null);
-  private readonly challenge = signal<OtpChallenge | null>(readStoredChallenge());
+  private readonly challenge = signal<PendingChallenge | null>(readStoredChallenge());
   private accessToken: string | null = null;
   private accessTokenExpiresAt = 0;
   private refreshInFlight: Observable<string | null> | null = null;
@@ -57,6 +64,11 @@ export class AuthService {
         }),
         map((response) => response.user),
       );
+  }
+
+  /** Abandons the pending verification (e.g. "use a different account"). */
+  clearChallenge(): void {
+    this.setChallenge(null);
   }
 
   /**
@@ -99,6 +111,7 @@ export class AuthService {
         catchError(() => of(undefined)),
         finalize(() => {
           this.clearSession();
+          this.googleIdentity.disableAutoSelect();
           this.router.navigateByUrl('/login');
         }),
       )
@@ -124,12 +137,13 @@ export class AuthService {
   }
 
   private setChallenge(challenge: OtpChallenge | null): void {
-    this.challenge.set(challenge);
+    const pending = challenge ? { ...challenge, receivedAt: Date.now() } : null;
+    this.challenge.set(pending);
     try {
       // sessionStorage (per tab, cleared on close) so a reload on the OTP page keeps the pending
       // verification. The challenge token only works on the OTP endpoints and expires in minutes.
-      if (challenge) {
-        sessionStorage.setItem(CHALLENGE_KEY, JSON.stringify(challenge));
+      if (pending) {
+        sessionStorage.setItem(CHALLENGE_KEY, JSON.stringify(pending));
       } else {
         sessionStorage.removeItem(CHALLENGE_KEY);
       }
@@ -147,10 +161,10 @@ export class AuthService {
   }
 }
 
-function readStoredChallenge(): OtpChallenge | null {
+function readStoredChallenge(): PendingChallenge | null {
   try {
     const raw = sessionStorage.getItem(CHALLENGE_KEY);
-    return raw ? (JSON.parse(raw) as OtpChallenge) : null;
+    return raw ? (JSON.parse(raw) as PendingChallenge) : null;
   } catch {
     return null;
   }

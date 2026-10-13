@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 
-import { authGuard, guestGuard } from './core/guards/auth.guard';
+import { authGuard, guestGuard, otpChallengeGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'chat' },
@@ -11,11 +11,18 @@ export const routes: Routes = [
     loadComponent: () => import('./features/login/login').then((m) => m.Login),
   },
   {
+    path: 'verify-otp',
+    title: 'Verify your email · AIChat',
+    canActivate: [guestGuard, otpChallengeGuard],
+    loadComponent: () =>
+      import('./features/otp-verification/otp-verification').then((m) => m.OtpVerification),
+  },
+  {
     path: 'chat',
     title: 'AIChat',
     canActivate: [authGuard],
     loadComponent: () => import('./features/chat/chat-page').then((m) => m.ChatPage),
   },
-  // otp-verification (Phase 6), profile (Phase 9) are added later.
+  // profile (Phase 9) is added later.
   { path: '**', redirectTo: 'chat' },
 ];

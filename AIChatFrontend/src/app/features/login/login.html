@@ -1,8 +1,42 @@
-<main class="login">
-  <section class="card">
-    <div class="logo" aria-hidden="true">AI</div>
-    <h1>AIChat</h1>
-    <p class="muted">Frontend scaffold is running. Google sign-in is added in Phase 6.</p>
-    <button type="button" class="btn" disabled>Continue with Google</button>
+<main class="auth-page">
+  <section class="card" aria-labelledby="login-title">
+    <app-logo [size]="56" />
+    <h1 id="login-title">Welcome to AIChat</h1>
+    <p class="subtitle">Sign in to start chatting with your AI assistant.</p>
+
+    @if (expired()) {
+      <p class="notice" role="status">Your session has expired. Please sign in again.</p>
+    }
+
+    <div class="google-area" [class.busy]="signingIn()">
+      <div #googleButton class="google-button" [hidden]="signingIn()"></div>
+
+      @if (!buttonReady() && !error()) {
+        <div class="placeholder">
+          <app-loading-spinner [size]="18" label="Loading Google sign-in" />
+          <span>Loading Google sign-in…</span>
+        </div>
+      }
+
+      @if (signingIn()) {
+        <div class="placeholder" role="status">
+          <app-loading-spinner [size]="18" label="Signing in" />
+          <span>Verifying your Google account and sending a code…</span>
+        </div>
+      }
+    </div>
+
+    @if (error(); as message) {
+      <div class="alert" role="alert">
+        <span>{{ message }}</span>
+        @if (!buttonReady()) {
+          <button type="button" class="link" (click)="renderGoogleButton()">Try again</button>
+        }
+      </div>
+    }
+
+    <p class="fineprint">
+      For your security, we'll email a 6-digit code to your Google account's address after you sign in.
+    </p>
   </section>
 </main>
