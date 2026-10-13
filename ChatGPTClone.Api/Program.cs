@@ -1,11 +1,31 @@
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using ChatGPTClone.Api.Configuration;
+using ChatGPTClone.Api.Data;
 using ChatGPTClone.Api.Middleware;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ---------- Database (connection string comes from user secrets / environment variables) ----------
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection is not configured. Set it with " +
+        "'dotnet user-secrets set \"ConnectionStrings:DefaultConnection\" \"...\"' (development) " +
+        "or the ConnectionStrings__DefaultConnection environment variable (production).");
+}
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(connectionString, sql =>
+    {
+        // SQL Server 2016 = compatibility level 130. Keeps EF from generating newer T-SQL.
+        sql.UseCompatibilityLevel(130);
+        sql.EnableRetryOnFailure(maxRetryCount: 3);
+    }));
 
 // ---------- Controllers & JSON ----------
 builder.Services
