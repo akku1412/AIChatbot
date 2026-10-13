@@ -5,6 +5,7 @@
   --bg: #ffffff;
   --surface: #f7f7f8;
   --surface-hover: #ececf1;
+  --sidebar-bg: #f9f9f9;
   --border: #e3e3e8;
   --text: #1f1f24;
   --text-muted: #6b6b76;
@@ -25,6 +26,7 @@
     --bg: #212121;
     --surface: #2a2a2e;
     --surface-hover: #34343a;
+    --sidebar-bg: #171717;
     --border: #3a3a40;
     --text: #ececf1;
     --text-muted: #a0a0ab;

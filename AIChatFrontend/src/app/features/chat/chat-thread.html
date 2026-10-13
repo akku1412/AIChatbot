@@ -1,0 +1,46 @@
+<div class="thread">
+  <div #scroller class="scroller">
+    <div class="column">
+      @if (store.messagesError(); as message) {
+        <div class="state error" role="alert">
+          <p>{{ message }}</p>
+          <a routerLink="/chat" class="link">Start a new chat</a>
+        </div>
+      } @else if (store.messagesLoading() && store.messages().length === 0) {
+        <div class="state"><app-loading-spinner label="Loading messages" /> Loading conversation…</div>
+      } @else if (store.messages().length === 0 && !store.sending()) {
+        <section class="welcome">
+          <h2>How can I help you today, {{ firstName() }}?</h2>
+          <div class="suggestions">
+            @for (suggestion of suggestions; track suggestion) {
+              <button type="button" class="suggestion" (click)="useSuggestion(suggestion)">{{ suggestion }}</button>
+            }
+          </div>
+        </section>
+      } @else {
+        @if (store.hasOlderMessages()) {
+          <button type="button" class="older" [disabled]="store.messagesLoading()" (click)="store.loadOlderMessages()">
+            {{ store.messagesLoading() ? 'Loading…' : 'Load earlier messages' }}
+          </button>
+        }
+        @for (message of store.messages(); track message.messageId) {
+          <app-chat-message [message]="message" />
+        }
+        @if (store.sending()) {
+          <app-typing-indicator />
+        }
+      }
+    </div>
+  </div>
+
+  <div class="composer-area">
+    <div class="column">
+      <app-message-input
+        [(text)]="draft"
+        [busy]="store.sending()"
+        [disabled]="!!store.messagesError()"
+        (send)="send($event)"
+      />
+    </div>
+  </div>
+</div>

@@ -20,9 +20,20 @@ export const routes: Routes = [
   },
   {
     path: 'chat',
-    title: 'AIChat',
     canActivate: [authGuard],
-    loadComponent: () => import('./features/chat/chat-page').then((m) => m.ChatPage),
+    loadComponent: () => import('./features/chat/chat-layout').then((m) => m.ChatLayout),
+    children: [
+      {
+        path: '',
+        title: 'New chat · AIChat',
+        loadComponent: () => import('./features/chat/chat-thread').then((m) => m.ChatThread),
+      },
+      {
+        path: ':conversationId',
+        title: 'AIChat',
+        loadComponent: () => import('./features/chat/chat-thread').then((m) => m.ChatThread),
+      },
+    ],
   },
   // profile (Phase 9) is added later.
   { path: '**', redirectTo: 'chat' },
