@@ -43,9 +43,9 @@ import { MAX_MESSAGE_LENGTH } from '../../../core/models/chat.models';
     .composer {
       display: flex; align-items: flex-end; gap: 8px;
       padding: 8px 8px 8px 16px; border: 1px solid var(--border); border-radius: 24px;
-      background: var(--surface); box-shadow: 0 2px 12px rgb(0 0 0 / 0.06);
+      background: var(--surface-raised); box-shadow: var(--shadow-md);
     }
-    .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+    .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-md); }
     textarea {
       flex: 1; resize: none; border: 0; outline: none; background: transparent; color: var(--text);
       font: inherit; line-height: 1.5; padding: 8px 0; max-height: 200px; overflow-y: auto;
@@ -54,9 +54,9 @@ import { MAX_MESSAGE_LENGTH } from '../../../core/models/chat.models';
     .send {
       flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0;
       display: grid; place-items: center; cursor: pointer;
-      background: var(--text); color: var(--bg);
+      background: var(--brand-gradient); color: #fff; box-shadow: 0 4px 12px color-mix(in srgb, #6366f1 35%, transparent);
     }
-    .send:disabled { opacity: 0.35; cursor: not-allowed; }
+    .send:disabled { background: var(--surface-hover); color: var(--text-muted); box-shadow: none; cursor: not-allowed; }
     .stop { width: 12px; height: 12px; border-radius: 2px; background: currentColor; }
     .hint { margin: 6px 0 0; text-align: center; font-size: 0.75rem; color: var(--text-muted); }
     .hint .over { color: var(--danger); }

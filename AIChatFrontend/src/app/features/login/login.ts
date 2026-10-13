@@ -5,11 +5,12 @@ import { AuthService } from '../../core/auth/auth.service';
 import { GoogleIdentityService } from '../../core/auth/google-identity.service';
 import { errorMessage } from '../../core/http/api-error';
 import { AppLogo } from '../../shared/components/app-logo/app-logo';
+import { AuthShell } from '../../shared/components/auth-shell/auth-shell';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 
 @Component({
   selector: 'app-login',
-  imports: [AppLogo, LoadingSpinner],
+  imports: [AppLogo, AuthShell, LoadingSpinner],
   templateUrl: './login.html',
   styleUrl: './login.css',
 })
@@ -38,9 +39,15 @@ export class Login {
     const host = this.buttonHost().nativeElement;
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     try {
+      // Measure only after web fonts and layout have settled, or the width comes out too small.
+      await document.fonts.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const available = Math.floor(host.getBoundingClientRect().width) || 400;
+
       await this.googleIdentity.renderButton(host, (idToken) => this.onCredential(idToken), {
         theme: dark ? 'filled_black' : 'outline',
-        width: Math.min(320, host.clientWidth || 320),
+        // Google accepts 200-400px; match the form width.
+        width: Math.max(200, Math.min(400, available)),
       });
       this.buttonReady.set(true);
     } catch (e) {

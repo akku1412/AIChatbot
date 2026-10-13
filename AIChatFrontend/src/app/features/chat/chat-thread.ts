@@ -4,6 +4,7 @@ import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http/api-error';
 import { ChatStore } from '../../core/services/chat.store';
+import { AppLogo } from '../../shared/components/app-logo/app-logo';
 import { ChatMessageView } from '../../shared/components/chat-message/chat-message';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 import { MessageInput } from '../../shared/components/message-input/message-input';
@@ -13,7 +14,7 @@ import { TypingIndicator } from '../../shared/components/typing-indicator/typing
 /** The open conversation (/chat/:conversationId) or a new chat (/chat). */
 @Component({
   selector: 'app-chat-thread',
-  imports: [RouterLink, ChatMessageView, MessageInput, TypingIndicator, LoadingSpinner],
+  imports: [RouterLink, AppLogo, ChatMessageView, MessageInput, TypingIndicator, LoadingSpinner],
   templateUrl: './chat-thread.html',
   styleUrl: './chat-thread.css',
 })
@@ -27,11 +28,31 @@ export class ChatThread {
   readonly conversationId = input<string>();
 
   protected readonly draft = signal('');
-  protected readonly suggestions = [
-    'Explain how JWT refresh tokens work, simply',
-    'Write a SQL query that finds duplicate emails',
-    'Give me a 3-day study plan for Angular signals',
-    'Help me write a polite follow-up email',
+  protected readonly suggestions: { icon: 'learn' | 'code' | 'plan' | 'write'; title: string; detail: string; prompt: string }[] = [
+    {
+      icon: 'learn',
+      title: 'Explain a concept',
+      detail: 'How JWT refresh tokens work, simply',
+      prompt: 'Explain how JWT refresh tokens work, simply, with a short example.',
+    },
+    {
+      icon: 'code',
+      title: 'Write some code',
+      detail: 'A SQL query that finds duplicate emails',
+      prompt: 'Write a SQL Server query that finds duplicate emails in a Users table.',
+    },
+    {
+      icon: 'plan',
+      title: 'Make a plan',
+      detail: 'A 3-day study plan for Angular signals',
+      prompt: 'Give me a 3-day study plan for learning Angular signals.',
+    },
+    {
+      icon: 'write',
+      title: 'Draft a message',
+      detail: 'A polite follow-up email after an interview',
+      prompt: 'Help me write a polite follow-up email after a job interview.',
+    },
   ];
 
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');

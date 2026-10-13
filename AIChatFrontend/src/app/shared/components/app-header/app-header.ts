@@ -17,7 +17,7 @@ import { Component, input, output } from '@angular/core';
   styles: `
     .header {
       height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
-      border-bottom: 1px solid var(--border); background: var(--bg);
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(8px);
     }
     .title {
       flex: 1; margin: 0; font-size: 1rem; font-weight: 600; text-align: center;

@@ -1,28 +1,18 @@
-.auth-page {
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background:
-    radial-gradient(1200px 600px at 50% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
-    var(--bg);
+.panel {
+  display: flex;
+  flex-direction: column;
 }
 
-.card {
-  width: 100%;
-  max-width: 420px;
-  padding: 40px 32px 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  text-align: center;
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.08);
+.mobile-logo {
+  display: none;
+  margin-bottom: 20px;
 }
 
 h1 {
-  margin: 20px 0 8px;
-  font-size: 1.625rem;
-  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .subtitle {
@@ -30,26 +20,60 @@ h1 {
   color: var(--text-muted);
 }
 
-.notice {
-  margin: 0 0 20px;
-  padding: 10px 12px;
+.notice,
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px 14px;
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
   font-size: 0.9375rem;
 }
 
+.notice svg,
+.alert svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.notice {
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.alert {
+  margin: 16px 0 0;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--text);
+}
+
+.alert svg {
+  color: var(--danger);
+}
+
+.alert-text {
+  flex: 1;
+}
+
+/* Button and loading text share one grid cell, so the button always gets the full width. */
 .google-area {
-  min-height: 48px;
-  display: flex;
-  justify-content: center;
+  min-height: 44px;
+  display: grid;
   align-items: center;
 }
 
+.google-area > * {
+  grid-area: 1 / 1;
+}
+
 .google-button {
-  display: flex;
-  justify-content: center;
   width: 100%;
-  max-width: 320px;
+  /* A cross-origin iframe inside a dark color-scheme page gets an opaque white backdrop;
+     matching the iframe's own (light) scheme keeps it transparent. */
+  color-scheme: light;
 }
 
 .placeholder {
@@ -58,21 +82,6 @@ h1 {
   gap: 10px;
   color: var(--text-muted);
   font-size: 0.9375rem;
-}
-
-.alert {
-  margin-top: 20px;
-  padding: 12px 14px;
-  border-radius: var(--radius);
-  border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: var(--text);
-  font-size: 0.9375rem;
-  text-align: left;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .link {
@@ -86,14 +95,37 @@ h1 {
   white-space: nowrap;
 }
 
-.fineprint {
-  margin: 28px 0 0;
-  font-size: 0.8125rem;
+.security {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
   color: var(--text-muted);
 }
 
-@media (max-width: 480px) {
-  .card {
-    padding: 32px 20px 24px;
+.security svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.security p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.legal {
+  margin: 20px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .mobile-logo {
+    display: inline-flex;
   }
 }

@@ -1,14 +1,18 @@
-<main class="auth-page">
-  <section class="card" aria-labelledby="login-title">
-    <app-logo [size]="56" />
-    <h1 id="login-title">Welcome to AIChat</h1>
-    <p class="subtitle">Sign in to start chatting with your AI assistant.</p>
+<app-auth-shell>
+  <section class="panel" aria-labelledby="login-title">
+    <app-logo class="mobile-logo" [size]="44" />
+
+    <h1 id="login-title">Sign in to AIChat</h1>
+    <p class="subtitle">Use your Google account to continue.</p>
 
     @if (expired()) {
-      <p class="notice" role="status">Your session has expired. Please sign in again.</p>
+      <div class="notice" role="status">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>Your session has expired. Please sign in again.</span>
+      </div>
     }
 
-    <div class="google-area" [class.busy]="signingIn()">
+    <div class="google-area">
       <div #googleButton class="google-button" [hidden]="signingIn()"></div>
 
       @if (!buttonReady() && !error()) {
@@ -21,22 +25,26 @@
       @if (signingIn()) {
         <div class="placeholder" role="status">
           <app-loading-spinner [size]="18" label="Signing in" />
-          <span>Verifying your Google account and sending a code…</span>
+          <span>Verifying your account and sending a code…</span>
         </div>
       }
     </div>
 
     @if (error(); as message) {
       <div class="alert" role="alert">
-        <span>{{ message }}</span>
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5.5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="alert-text">{{ message }}</span>
         @if (!buttonReady()) {
           <button type="button" class="link" (click)="renderGoogleButton()">Try again</button>
         }
       </div>
     }
 
-    <p class="fineprint">
-      For your security, we'll email a 6-digit code to your Google account's address after you sign in.
-    </p>
+    <div class="security">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <p>After Google sign-in we email a 6-digit code to your Google address. Your session starts only after the code is verified.</p>
+    </div>
+
+    <p class="legal">By continuing you agree to use AIChat responsibly. AI answers can be wrong; check important information.</p>
   </section>
-</main>
+</app-auth-shell>

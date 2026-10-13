@@ -35,43 +35,92 @@
 }
 
 .welcome {
-  min-height: 55dvh;
+  min-height: 60dvh;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   text-align: center;
-  gap: 24px;
 }
 
 .welcome h2 {
-  margin: 0;
-  font-size: clamp(1.375rem, 3vw, 1.875rem);
-  font-weight: 600;
+  margin: 20px 0 6px;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.welcome-sub {
+  margin: 0 0 32px;
+  color: var(--text-muted);
 }
 
 .suggestions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  max-width: 620px;
+  max-width: 680px;
 }
 
 .suggestion {
-  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: transparent;
+  border-radius: 14px;
+  background: var(--surface-raised);
   color: var(--text);
   font: inherit;
-  font-size: 0.9375rem;
   text-align: left;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 120ms, box-shadow 120ms, transform 120ms;
 }
 
 .suggestion:hover {
-  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.s-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.s-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.s-text strong {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.s-text span {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggestion {
+    transition: none;
+  }
+
+  .suggestion:hover {
+    transform: none;
+  }
 }
 
 .state {

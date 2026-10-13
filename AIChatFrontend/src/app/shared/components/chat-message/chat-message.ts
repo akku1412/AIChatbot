@@ -1,6 +1,7 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
 
 import { ChatMessage } from '../../../core/models/chat.models';
+import { AppLogo } from '../app-logo/app-logo';
 import { MarkdownView } from '../markdown/markdown';
 import { NotificationService } from '../toast/notification.service';
 
@@ -10,11 +11,11 @@ import { NotificationService } from '../toast/notification.service';
  */
 @Component({
   selector: 'app-chat-message',
-  imports: [MarkdownView],
+  imports: [AppLogo, MarkdownView],
   template: `
     <article class="message" [class.user]="isUser()" [class.assistant]="!isUser()" [attr.aria-label]="isUser() ? 'You said' : 'AIChat replied'">
       @if (!isUser()) {
-        <div class="avatar" aria-hidden="true">AI</div>
+        <app-logo class="avatar" [size]="30" />
       }
       <div class="body">
         @if (isUser()) {
@@ -43,14 +44,12 @@ import { NotificationService } from '../toast/notification.service';
     .message.user { justify-content: flex-end; }
     .user .body { max-width: min(80%, 560px); }
     .user .content {
-      background: var(--surface-hover); padding: 10px 16px; border-radius: 20px 20px 6px 20px;
+      background: color-mix(in srgb, var(--accent) 12%, var(--surface)); padding: 10px 16px;
+      border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 18px 18px 6px 18px;
     }
     .assistant .body { flex: 1; min-width: 0; }
     .content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
-    .avatar {
-      flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
-      background: var(--accent); color: var(--accent-contrast); font-size: 0.6875rem; font-weight: 700; margin-top: 2px;
-    }
+    .avatar { margin-top: 2px; }
     .actions { margin-top: 6px; }
     .action {
       display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px;

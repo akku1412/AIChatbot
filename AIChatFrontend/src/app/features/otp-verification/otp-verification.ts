@@ -14,7 +14,7 @@ import { Router } from '@angular/router';
 
 import { AuthService } from '../../core/auth/auth.service';
 import { safeReturnUrl, toApiProblem } from '../../core/http/api-error';
-import { AppLogo } from '../../shared/components/app-logo/app-logo';
+import { AuthShell } from '../../shared/components/auth-shell/auth-shell';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 
@@ -22,7 +22,7 @@ const CODE_LENGTH = 6;
 
 @Component({
   selector: 'app-otp-verification',
-  imports: [ReactiveFormsModule, AppLogo, LoadingSpinner],
+  imports: [ReactiveFormsModule, AuthShell, LoadingSpinner],
   templateUrl: './otp-verification.html',
   styleUrl: './otp-verification.css',
 })

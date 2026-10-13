@@ -25,7 +25,8 @@ interface GoogleAccountsId {
       text?: 'signin_with' | 'signup_with' | 'continue_with' | 'signin';
       shape?: 'rectangular' | 'pill' | 'circle' | 'square';
       logo_alignment?: 'left' | 'center';
-      width?: number;
+      /** Pixels as a string, 200-400 (GIS ignores numbers in some browsers). */
+      width?: string;
     },
   ): void;
   disableAutoSelect(): void;
@@ -68,7 +69,7 @@ export class GoogleIdentityService {
       text: 'continue_with',
       shape: 'pill',
       logo_alignment: 'left',
-      width: options.width,
+      width: String(Math.round(options.width)),
     });
   }
 

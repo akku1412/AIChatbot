@@ -10,10 +10,33 @@
         <div class="state"><app-loading-spinner label="Loading messages" /> Loading conversation…</div>
       } @else if (store.messages().length === 0 && !store.sending()) {
         <section class="welcome">
-          <h2>How can I help you today, {{ firstName() }}?</h2>
+          <app-logo [size]="52" />
+          <h2>Hi {{ firstName() }}, how can I help today?</h2>
+          <p class="welcome-sub">Ask anything, or start with one of these.</p>
           <div class="suggestions">
-            @for (suggestion of suggestions; track suggestion) {
-              <button type="button" class="suggestion" (click)="useSuggestion(suggestion)">{{ suggestion }}</button>
+            @for (suggestion of suggestions; track suggestion.title) {
+              <button type="button" class="suggestion" (click)="useSuggestion(suggestion.prompt)">
+                <span class="s-icon" aria-hidden="true">
+                  @switch (suggestion.icon) {
+                    @case ('learn') {
+                      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    }
+                    @case ('code') {
+                      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    }
+                    @case ('plan') {
+                      <svg viewBox="0 0 24 24" width="18" height="18"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    }
+                    @case ('write') {
+                      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    }
+                  }
+                </span>
+                <span class="s-text">
+                  <strong>{{ suggestion.title }}</strong>
+                  <span>{{ suggestion.detail }}</span>
+                </span>
+              </button>
             }
           </div>
         </section>

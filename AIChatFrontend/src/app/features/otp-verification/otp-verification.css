@@ -1,45 +1,42 @@
-.auth-page {
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background:
-    radial-gradient(1200px 600px at 50% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
-    var(--bg);
+.panel {
+  display: flex;
+  flex-direction: column;
 }
 
-.card {
-  width: 100%;
-  max-width: 440px;
-  padding: 36px 32px 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  text-align: center;
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.08);
+.mail-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 h1 {
-  margin: 16px 0 8px;
-  font-size: 1.5rem;
+  margin: 0 0 6px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .subtitle {
-  margin: 0 0 24px;
+  margin: 0 0 28px;
   color: var(--text-muted);
 }
 
 .code-form {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 16px;
 }
 
 .digits {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
   border: 0;
   margin: 0;
   padding: 0;
@@ -47,22 +44,27 @@ h1 {
 }
 
 .digit {
-  width: 48px;
-  height: 56px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
+  width: 100%;
+  height: 58px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-raised);
   color: var(--text);
   font: 600 1.5rem var(--mono);
   text-align: center;
   caret-color: var(--accent);
+  box-shadow: var(--shadow-sm);
   transition: border-color 120ms, box-shadow 120ms;
+}
+
+.digit.filled {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
 }
 
 .digit:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .digit.invalid {
@@ -74,41 +76,62 @@ h1 {
 }
 
 .error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   color: var(--danger);
   font-size: 0.9375rem;
 }
 
+.error svg {
+  flex: none;
+}
+
 .primary {
-  width: 100%;
-  max-width: 320px;
   display: inline-flex;
   justify-content: center;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  height: 46px;
   border: 0;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  border-radius: var(--radius);
+  background: var(--brand-gradient);
+  color: #ffffff;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, #6366f1 35%, transparent);
+  transition: filter 120ms, box-shadow 120ms;
 }
 
 .primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  filter: brightness(1.06);
 }
 
 .primary:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-.expiry {
-  margin: 20px 0 8px;
-  font-size: 0.9375rem;
+.meta {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 20px;
+  font-size: 0.875rem;
   color: var(--text-muted);
+}
+
+.meta p {
+  margin: 0;
+}
+
+.expiry strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .expiry.expired {
@@ -117,9 +140,11 @@ h1 {
 
 .resend {
   display: flex;
-  justify-content: center;
   gap: 6px;
-  font-size: 0.9375rem;
+}
+
+.resend .muted {
+  font-variant-numeric: tabular-nums;
 }
 
 .link {
@@ -137,11 +162,25 @@ h1 {
   cursor: not-allowed;
 }
 
-.link.subtle {
-  margin-top: 20px;
-  font-weight: 500;
-  font-size: 0.875rem;
+.back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 32px;
+  padding: 8px 12px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
   color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.back:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .sr-only {
@@ -154,16 +193,11 @@ h1 {
 }
 
 @media (max-width: 420px) {
-  .card {
-    padding: 28px 16px 24px;
-  }
-
   .digits {
     gap: 6px;
   }
 
   .digit {
-    width: 42px;
     height: 50px;
     font-size: 1.25rem;
   }
