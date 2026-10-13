@@ -1,0 +1,18 @@
+# Old reference backend: kept locally only (its appsettings.json contains real secrets)
+AIChatAPI/
+
+# IDE / OS
+.vs/
+Visual Studio 2022/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Backup of the frontend's original standalone git history
+.git-backup-frontend/
+
+# Secrets must never be committed (use dotnet user-secrets / environment variables)
+appsettings.*.local.json
+*.env
+.env*

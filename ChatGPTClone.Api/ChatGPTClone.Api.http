@@ -1,0 +1,12 @@
+@baseUrl = https://localhost:7180
+
+### Health check
+GET {{baseUrl}}/api/health
+Accept: application/json
+
+### CORS preflight from the Angular dev origin (expect Access-Control-Allow-Origin header)
+OPTIONS {{baseUrl}}/api/health
+Origin: http://localhost:4200
+Access-Control-Request-Method: GET
+
+###
