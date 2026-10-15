@@ -181,3 +181,112 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    DELETE FROM [OtpVerifications];
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    ALTER TABLE [OtpVerifications] DROP CONSTRAINT [FK_OtpVerifications_Users_UserId];
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    DROP INDEX [UX_Users_GoogleId] ON [Users];
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    DROP INDEX [IX_OtpVerifications_UserId_IsUsed_CreatedAt] ON [OtpVerifications];
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    DECLARE @var0 sysname;
+    SELECT @var0 = [d].[name]
+    FROM [sys].[default_constraints] [d]
+    INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+    WHERE ([d].[parent_object_id] = OBJECT_ID(N'[OtpVerifications]') AND [c].[name] = N'UserId');
+    IF @var0 IS NOT NULL EXEC(N'ALTER TABLE [OtpVerifications] DROP CONSTRAINT [' + @var0 + '];');
+    ALTER TABLE [OtpVerifications] DROP COLUMN [UserId];
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    DECLARE @var1 sysname;
+    SELECT @var1 = [d].[name]
+    FROM [sys].[default_constraints] [d]
+    INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+    WHERE ([d].[parent_object_id] = OBJECT_ID(N'[Users]') AND [c].[name] = N'GoogleId');
+    IF @var1 IS NOT NULL EXEC(N'ALTER TABLE [Users] DROP CONSTRAINT [' + @var1 + '];');
+    ALTER TABLE [Users] ALTER COLUMN [GoogleId] nvarchar(255) NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    ALTER TABLE [OtpVerifications] ADD [Email] nvarchar(256) NOT NULL DEFAULT N'';
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    EXEC(N'CREATE UNIQUE INDEX [UX_Users_GoogleId] ON [Users] ([GoogleId]) WHERE [GoogleId] IS NOT NULL');
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    CREATE INDEX [IX_OtpVerifications_Email_IsUsed_CreatedAt] ON [OtpVerifications] ([Email], [IsUsed], [CreatedAt]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261015064133_EmailOtpLoginAndOptionalGoogleId'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261015064133_EmailOtpLoginAndOptionalGoogleId', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+
