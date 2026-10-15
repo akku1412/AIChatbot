@@ -12,20 +12,16 @@ public sealed class OtpVerificationConfiguration : IEntityTypeConfiguration<OtpV
             t.HasCheckConstraint("CK_OtpVerifications_AttemptCount", "[AttemptCount] >= 0"));
         builder.HasKey(o => o.OtpVerificationId);
 
-        // HMAC-SHA256 as hex = 64 characters.
+        builder.Property(o => o.Email).HasMaxLength(256).IsRequired();
+        // base64(salt) + "." + HMAC-SHA256 hex = 89 characters.
         builder.Property(o => o.OtpHash).HasMaxLength(128).IsUnicode(false).IsRequired();
         builder.Property(o => o.IsUsed).HasDefaultValue(false);
         builder.Property(o => o.AttemptCount).HasDefaultValue(0);
         builder.Property(o => o.ExpiresAt).HasColumnType("datetime2(3)");
         builder.Property(o => o.CreatedAt).HasColumnType("datetime2(3)");
 
-        builder.HasOne(o => o.User)
-            .WithMany(u => u.OtpVerifications)
-            .HasForeignKey(o => o.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // "Latest OTP for this user" and "invalidate all active OTPs" lookups.
-        builder.HasIndex(o => new { o.UserId, o.IsUsed, o.CreatedAt })
-            .HasDatabaseName("IX_OtpVerifications_UserId_IsUsed_CreatedAt");
+        // "Latest active code for this email", "invalidate older codes" and the hourly cap.
+        builder.HasIndex(o => new { o.Email, o.IsUsed, o.CreatedAt })
+            .HasDatabaseName("IX_OtpVerifications_Email_IsUsed_CreatedAt");
     }
 }

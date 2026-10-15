@@ -14,10 +14,10 @@ export const authGuard: CanActivateFn = (_route, state) => {
     .pipe(map((ok) => ok || router.createUrlTree(['/login'], { queryParams: { returnUrl: state.url } })));
 };
 
-/** OTP page: only reachable while a Google sign-in is waiting for its code. */
+/** Code page: only reachable while an email sign-in is waiting for its code. */
 export const otpChallengeGuard: CanActivateFn = () => {
   const auth = inject(AuthService);
-  return auth.pendingChallenge() ? true : inject(Router).createUrlTree(['/login']);
+  return auth.pendingOtp() ? true : inject(Router).createUrlTree(['/login']);
 };
 
 /** Login/OTP pages: a signed-in user is sent straight to the chat. */

@@ -34,7 +34,7 @@ export class OtpVerification {
   /** Query param (bound by withComponentInputBinding). */
   readonly returnUrl = input<string>();
 
-  protected readonly challenge = this.auth.pendingChallenge;
+  protected readonly pending = this.auth.pendingOtp;
   protected readonly digits = new FormArray(
     Array.from(
       { length: CODE_LENGTH },
@@ -60,14 +60,14 @@ export class OtpVerification {
   protected readonly info = signal<string | null>(null);
 
   constructor() {
-    const pending = this.challenge();
+    const pending = this.pending();
     if (pending) {
       this.resendAt.set(pending.receivedAt + pending.resendAvailableInSeconds * 1000);
       this.expiresAt.set(pending.receivedAt + pending.expiresInSeconds * 1000);
       this.info.set(
         pending.codeSent
-          ? `We sent a 6-digit code to ${pending.maskedEmail}.`
-          : `We already sent a code to ${pending.maskedEmail}. Check your inbox (and spam folder).`,
+          ? `We sent a 6-digit code to ${pending.email}.`
+          : `We already sent a code to ${pending.email}. Check your inbox (and spam folder).`,
       );
     }
 
@@ -166,11 +166,11 @@ export class OtpVerification {
     this.error.set(null);
 
     this.auth.resendOtp().subscribe({
-      next: (challenge) => {
+      next: (sent) => {
         this.resending.set(false);
-        this.resendAt.set(Date.now() + challenge.resendAvailableInSeconds * 1000);
-        this.expiresAt.set(Date.now() + challenge.expiresInSeconds * 1000);
-        this.info.set(`We sent a new code to ${challenge.maskedEmail}. Previous codes no longer work.`);
+        this.resendAt.set(Date.now() + sent.resendAvailableInSeconds * 1000);
+        this.expiresAt.set(Date.now() + sent.expiresInSeconds * 1000);
+        this.info.set(`We sent a new code to ${sent.email}. Previous codes no longer work.`);
         this.clearDigits();
       },
       error: (err: unknown) => {
@@ -189,15 +189,16 @@ export class OtpVerification {
     });
   }
 
-  protected useDifferentAccount(): void {
-    this.auth.clearChallenge();
-    this.router.navigate(['/login']);
+  /** Back to the login page with the address prefilled, to fix a typo or use another email. */
+  protected changeEmail(): void {
+    const email = this.pending()?.email;
+    this.auth.clearPendingOtp();
+    this.router.navigate(['/login'], { queryParams: email ? { email } : {} });
   }
 
   private restartSignIn(message: string): void {
     this.notifications.error(message);
-    this.auth.clearChallenge();
-    this.router.navigate(['/login']);
+    this.changeEmail();
   }
 
   private fillFrom(start: number, value: string): void {

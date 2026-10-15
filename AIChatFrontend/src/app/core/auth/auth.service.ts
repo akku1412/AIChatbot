@@ -4,13 +4,13 @@ import { Router } from '@angular/router';
 import { Observable, catchError, finalize, map, of, shareReplay, tap } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { AuthResponse, OtpChallenge, User } from './auth.models';
+import { AuthResponse, OtpSent, User } from './auth.models';
 import { GoogleIdentityService } from './google-identity.service';
 
-const CHALLENGE_KEY = 'aichat.otpChallenge';
+const PENDING_KEY = 'aichat.pendingOtp';
 
-/** An OTP challenge plus when this browser received it, so countdowns survive a page reload. */
-export interface PendingChallenge extends OtpChallenge {
+/** An emailed code waiting to be verified, plus when this browser got it (so countdowns survive a reload). */
+export interface PendingOtp extends OtpSent {
   receivedAt: number;
 }
 
@@ -26,50 +26,68 @@ export class AuthService {
   private readonly baseUrl = `${environment.apiBaseUrl}/auth`;
 
   private readonly currentUser = signal<User | null>(null);
-  private readonly challenge = signal<PendingChallenge | null>(readStoredChallenge());
+  private readonly pending = signal<PendingOtp | null>(readStoredPending());
   private accessToken: string | null = null;
   private accessTokenExpiresAt = 0;
   private refreshInFlight: Observable<string | null> | null = null;
 
   readonly user = this.currentUser.asReadonly();
   readonly isAuthenticated = computed(() => this.currentUser() !== null);
-  /** Pending OTP verification (set after Google sign-in, cleared after verify). */
-  readonly pendingChallenge = this.challenge.asReadonly();
+  /** Email sign-in waiting for its code (set by sendOtp, cleared after verify). */
+  readonly pendingOtp = this.pending.asReadonly();
 
   getAccessToken(): string | null {
     return this.accessToken;
   }
 
-  /** Step 1: exchange the Google credential for an OTP challenge; a code is emailed. */
-  signInWithGoogle(idToken: string): Observable<OtpChallenge> {
+  // ---------- Email OTP ----------
+
+  /** Step 1: email a 6-digit code to the address. */
+  sendOtp(email: string): Observable<OtpSent> {
     return this.http
-      .post<OtpChallenge>(`${this.baseUrl}/google`, { idToken })
-      .pipe(tap((challenge) => this.setChallenge(challenge)));
+      .post<OtpSent>(`${this.baseUrl}/send-otp`, { email: email.trim() })
+      .pipe(tap((sent) => this.setPending(sent)));
   }
 
-  resendOtp(): Observable<OtpChallenge> {
+  /** New code after the cooldown; the previous code stops working. */
+  resendOtp(): Observable<OtpSent> {
     return this.http
-      .post<OtpChallenge>(`${this.baseUrl}/send-otp`, { challengeToken: this.requireChallenge() })
-      .pipe(tap((challenge) => this.setChallenge(challenge)));
+      .post<OtpSent>(`${this.baseUrl}/resend-otp`, { email: this.requirePendingEmail() })
+      .pipe(tap((sent) => this.setPending(sent)));
   }
 
-  /** Step 2: verify the code. Only this starts a session. */
+  /** Step 2: verify the code; creates the account on first sign-in and starts the session. */
   verifyOtp(code: string): Observable<User> {
     return this.http
-      .post<AuthResponse>(`${this.baseUrl}/verify-otp`, { challengeToken: this.requireChallenge(), code })
+      .post<AuthResponse>(`${this.baseUrl}/verify-otp`, { email: this.requirePendingEmail(), code })
       .pipe(
         tap((response) => {
           this.setSession(response);
-          this.setChallenge(null);
+          this.setPending(null);
         }),
         map((response) => response.user),
       );
   }
 
-  /** Abandons the pending verification (e.g. "use a different account"). */
-  clearChallenge(): void {
-    this.setChallenge(null);
+  /** Abandons the pending email sign-in ("change email"). */
+  clearPendingOtp(): void {
+    this.setPending(null);
   }
+
+  // ---------- Google ----------
+
+  /** Google sign-in: the API validates the Google ID token and starts the session directly (no OTP). */
+  signInWithGoogle(idToken: string): Observable<User> {
+    return this.http.post<AuthResponse>(`${this.baseUrl}/google`, { idToken }).pipe(
+      tap((response) => {
+        this.setSession(response);
+        this.setPending(null);
+      }),
+      map((response) => response.user),
+    );
+  }
+
+  // ---------- Session ----------
 
   /**
    * Gets a new access token from the refresh cookie. Concurrent callers share one request,
@@ -136,35 +154,35 @@ export class AuthService {
     this.currentUser.set(null);
   }
 
-  private setChallenge(challenge: OtpChallenge | null): void {
-    const pending = challenge ? { ...challenge, receivedAt: Date.now() } : null;
-    this.challenge.set(pending);
+  private setPending(sent: OtpSent | null): void {
+    const pending = sent ? { ...sent, receivedAt: Date.now() } : null;
+    this.pending.set(pending);
     try {
-      // sessionStorage (per tab, cleared on close) so a reload on the OTP page keeps the pending
-      // verification. The challenge token only works on the OTP endpoints and expires in minutes.
+      // sessionStorage (this tab only, cleared on close) so a reload on the code page keeps the email.
+      // It holds no secret: only the address and countdown times.
       if (pending) {
-        sessionStorage.setItem(CHALLENGE_KEY, JSON.stringify(pending));
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
       } else {
-        sessionStorage.removeItem(CHALLENGE_KEY);
+        sessionStorage.removeItem(PENDING_KEY);
       }
     } catch {
       // Storage unavailable (private mode etc.): the in-memory signal still works.
     }
   }
 
-  private requireChallenge(): string {
-    const challenge = this.challenge();
-    if (!challenge) {
-      throw new Error('No pending verification. Sign in with Google first.');
+  private requirePendingEmail(): string {
+    const pending = this.pending();
+    if (!pending) {
+      throw new Error('No pending email sign-in. Enter your email first.');
     }
-    return challenge.challengeToken;
+    return pending.email;
   }
 }
 
-function readStoredChallenge(): PendingChallenge | null {
+function readStoredPending(): PendingOtp | null {
   try {
-    const raw = sessionStorage.getItem(CHALLENGE_KEY);
-    return raw ? (JSON.parse(raw) as PendingChallenge) : null;
+    const raw = sessionStorage.getItem(PENDING_KEY);
+    return raw ? (JSON.parse(raw) as PendingOtp) : null;
   } catch {
     return null;
   }

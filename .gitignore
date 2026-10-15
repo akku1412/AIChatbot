@@ -16,3 +16,6 @@ Thumbs.db
 appsettings.*.local.json
 *.env
 .env*
+
+# Build output of publish.ps1
+publish/

@@ -24,7 +24,7 @@ import { AppLogo } from '../app-logo/app-logo';
               <span class="icon">
                 <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </span>
-              <div><strong>Two-step sign-in</strong><span>Google account plus a one-time email code.</span></div>
+              <div><strong>Passwordless sign-in</strong><span>Continue with Google, or with a one-time code sent to your email.</span></div>
             </li>
             <li>
               <span class="icon">

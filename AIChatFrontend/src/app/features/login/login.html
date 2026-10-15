@@ -3,7 +3,7 @@
     <app-logo class="mobile-logo" [size]="44" />
 
     <h1 id="login-title">Sign in to AIChat</h1>
-    <p class="subtitle">Use your Google account to continue.</p>
+    <p class="subtitle">Continue with Google, or get a one-time code by email.</p>
 
     @if (expired()) {
       <div class="notice" role="status">
@@ -12,25 +12,26 @@
       </div>
     }
 
+    <!-- Google -->
     <div class="google-area">
-      <div #googleButton class="google-button" [hidden]="signingIn()"></div>
+      <div #googleButton class="google-button" [hidden]="googleSigningIn()"></div>
 
-      @if (!buttonReady() && !error()) {
+      @if (!buttonReady() && !googleError()) {
         <div class="placeholder">
           <app-loading-spinner [size]="18" label="Loading Google sign-in" />
           <span>Loading Google sign-in…</span>
         </div>
       }
 
-      @if (signingIn()) {
+      @if (googleSigningIn()) {
         <div class="placeholder" role="status">
           <app-loading-spinner [size]="18" label="Signing in" />
-          <span>Verifying your account and sending a code…</span>
+          <span>Signing you in with Google…</span>
         </div>
       }
     </div>
 
-    @if (error(); as message) {
+    @if (googleError(); as message) {
       <div class="alert" role="alert">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5.5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <span class="alert-text">{{ message }}</span>
@@ -40,10 +41,49 @@
       </div>
     }
 
-    <div class="security">
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      <p>After Google sign-in we email a 6-digit code to your Google address. Your session starts only after the code is verified.</p>
-    </div>
+    <div class="divider" role="separator"><span>or</span></div>
+
+    <!-- Email OTP -->
+    <form class="email-form" [formGroup]="emailForm" (ngSubmit)="sendCode()" novalidate>
+      <label for="email">Email address</label>
+      <input
+        id="email"
+        type="email"
+        formControlName="email"
+        placeholder="you@gmail.com"
+        autocomplete="email"
+        inputmode="email"
+        [class.invalid]="emailControl.invalid && emailControl.touched"
+        [attr.aria-invalid]="emailControl.invalid && emailControl.touched"
+        aria-describedby="email-help"
+      />
+      @if (emailControl.invalid && emailControl.touched) {
+        <p class="field-error" role="alert">
+          @if (emailControl.hasError('required')) {
+            Enter your email address.
+          } @else {
+            Enter a valid email address.
+          }
+        </p>
+      }
+
+      <button type="submit" class="primary" [disabled]="sendingCode()">
+        @if (sendingCode()) {
+          <app-loading-spinner [size]="16" label="Sending code" />
+          <span>Sending code…</span>
+        } @else {
+          <span>Send OTP</span>
+        }
+      </button>
+      <p id="email-help" class="help">We'll email you a 6-digit code. New here? Your account is created when you verify it.</p>
+    </form>
+
+    @if (emailError(); as message) {
+      <div class="alert" role="alert">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5.5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="alert-text">{{ message }}</span>
+      </div>
+    }
 
     <p class="legal">By continuing you agree to use AIChat responsibly. AI answers can be wrong; check important information.</p>
   </section>

@@ -1,6 +1,5 @@
 using ChatGPTClone.Api.DTOs.Auth;
 using ChatGPTClone.Api.DTOs.Users;
-using ChatGPTClone.Api.Models;
 
 namespace ChatGPTClone.Api.Interfaces;
 
@@ -14,13 +13,14 @@ public interface IEmailSender
 public interface IOtpService
 {
     /// <summary>
-    /// Issues a new code (invalidating older ones) and emails it.
+    /// Issues a new code for the (lower-cased) email, invalidating older ones, and emails it.
     /// When <paramref name="explicitResend"/> is false and a recent code is still valid, no new email is sent.
     /// </summary>
-    Task<OtpIssueResult> IssueAsync(User user, bool explicitResend, CancellationToken cancellationToken);
+    Task<OtpIssueResult> IssueAsync(string email, string? recipientName, bool explicitResend,
+        CancellationToken cancellationToken);
 
     /// <summary>Checks a code. Throws ApiException with a user-facing reason when it is not accepted.</summary>
-    Task VerifyAsync(User user, string code, CancellationToken cancellationToken);
+    Task VerifyAsync(string email, string code, CancellationToken cancellationToken);
 }
 
 public sealed record OtpIssueResult(bool CodeSent, int ExpiresInSeconds, int ResendAvailableInSeconds);
@@ -30,11 +30,17 @@ public sealed record AuthSession(AuthResponse Response, IssuedRefreshToken Refre
 
 public interface IAuthService
 {
-    Task<OtpChallengeResponse> SignInWithGoogleAsync(string idToken, CancellationToken cancellationToken);
-    Task<OtpChallengeResponse> ResendOtpAsync(string challengeToken, CancellationToken cancellationToken);
+    /// <summary>Email sign-in, step 1: emails a code. Same response whether or not an account exists.</summary>
+    Task<OtpSentResponse> SendOtpAsync(string email, CancellationToken cancellationToken);
 
-    /// <summary>The ONLY place a new session (access + refresh token) is created.</summary>
-    Task<AuthSession> VerifyOtpAsync(string challengeToken, string code, CancellationToken cancellationToken);
+    /// <summary>Email sign-in: a new code after the cooldown (invalidates the previous one).</summary>
+    Task<OtpSentResponse> ResendOtpAsync(string email, CancellationToken cancellationToken);
+
+    /// <summary>Email sign-in, step 2: verifies the code, creates the account if new, and starts a session.</summary>
+    Task<AuthSession> VerifyOtpAsync(string email, string code, CancellationToken cancellationToken);
+
+    /// <summary>Google sign-in: validates the ID token server-side, finds/creates/links the account, starts a session.</summary>
+    Task<AuthSession> SignInWithGoogleAsync(string idToken, CancellationToken cancellationToken);
 
     Task<AuthSession> RefreshAsync(string refreshToken, CancellationToken cancellationToken);
     Task LogoutAsync(string? refreshToken, CancellationToken cancellationToken);

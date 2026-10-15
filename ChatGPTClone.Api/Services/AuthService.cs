@@ -1,3 +1,4 @@
+using System.Globalization;
 using ChatGPTClone.Api.Authentication;
 using ChatGPTClone.Api.DTOs.Auth;
 using ChatGPTClone.Api.DTOs.Users;
@@ -10,55 +11,72 @@ using Microsoft.EntityFrameworkCore;
 namespace ChatGPTClone.Api.Services;
 
 /// <summary>
-/// Google sign-in followed by mandatory email OTP. The email used for the OTP always comes from the
-/// validated Google token (stored on the user), never from client input.
+/// Two ways to sign in, one account per email address:
+/// - Email OTP: a code is emailed; verifying it proves the user controls the mailbox. The account is
+///   created only after a successful verification.
+/// - Google: the ID token is validated server-side (signature, audience, expiry, verified email); no OTP.
+/// Signing in with Google using the email of an existing email-OTP account links Google to that account.
 /// </summary>
 public sealed class AuthService(
     IGoogleTokenValidator googleTokenValidator,
     IUserRepository userRepository,
     IOtpService otpService,
-    IOtpChallengeProtector challengeProtector,
     ITokenService tokenService,
     IRefreshTokenService refreshTokenService,
     ILogger<AuthService> logger) : IAuthService
 {
-    public async Task<OtpChallengeResponse> SignInWithGoogleAsync(string idToken, CancellationToken cancellationToken)
+    // ---------------- Email OTP ----------------
+
+    public Task<OtpSentResponse> SendOtpAsync(string email, CancellationToken cancellationToken) =>
+        IssueOtpAsync(NormalizeEmail(email), explicitResend: false, cancellationToken);
+
+    public Task<OtpSentResponse> ResendOtpAsync(string email, CancellationToken cancellationToken) =>
+        IssueOtpAsync(NormalizeEmail(email), explicitResend: true, cancellationToken);
+
+    public async Task<AuthSession> VerifyOtpAsync(string email, string code, CancellationToken cancellationToken)
     {
-        var identity = await googleTokenValidator.ValidateAsync(idToken)
-            ?? throw new ApiException(StatusCodes.Status401Unauthorized, "Google sign-in failed",
-                "We could not verify your Google sign-in. Please try again.");
+        var normalized = NormalizeEmail(email);
+        await otpService.VerifyAsync(normalized, code, cancellationToken);
 
-        var user = await UpsertUserAsync(identity, cancellationToken);
-        var issue = await otpService.IssueAsync(user, explicitResend: false, cancellationToken);
-
-        return ToChallengeResponse(user, issue);
-    }
-
-    public async Task<OtpChallengeResponse> ResendOtpAsync(string challengeToken, CancellationToken cancellationToken)
-    {
-        var user = await GetChallengedUserAsync(challengeToken, cancellationToken);
-        var issue = await otpService.IssueAsync(user, explicitResend: true, cancellationToken);
-
-        return ToChallengeResponse(user, issue);
-    }
-
-    public async Task<AuthSession> VerifyOtpAsync(string challengeToken, string code, CancellationToken cancellationToken)
-    {
-        var user = await GetChallengedUserAsync(challengeToken, cancellationToken);
-        await otpService.VerifyAsync(user, code, cancellationToken);
-
-        if (!user.IsEmailVerified)
+        // The mailbox is proven: sign in to the existing account, or register a new one.
+        var user = await userRepository.GetByEmailAsync(normalized, cancellationToken);
+        if (user is null)
+        {
+            user = new User { Email = normalized, FullName = NameFromEmail(normalized), IsEmailVerified = true };
+            userRepository.Add(user);
+            if (!await TrySaveAsync(cancellationToken))
+            {
+                // A parallel sign-in for the same email created the account first: use that one.
+                user = await userRepository.GetByEmailAsync(normalized, cancellationToken) ?? throw RetryLater();
+            }
+            else
+            {
+                logger.LogInformation("Registered user {UserId} via email OTP", user.UserId);
+            }
+        }
+        else if (!user.IsEmailVerified)
         {
             user.IsEmailVerified = true;
             await userRepository.SaveChangesAsync(cancellationToken);
         }
 
-        // OTP passed: this is the only point where an application session is created.
-        var refreshToken = await refreshTokenService.IssueAsync(user.UserId, cancellationToken);
-        logger.LogInformation("User {UserId} signed in", user.UserId);
-
-        return CreateSession(user, refreshToken);
+        return await StartSessionAsync(user, "email OTP", cancellationToken);
     }
+
+    // ---------------- Google ----------------
+
+    public async Task<AuthSession> SignInWithGoogleAsync(string idToken, CancellationToken cancellationToken)
+    {
+        // Never trust an email or Google id sent by the client: only what the validated token says.
+        var identity = await googleTokenValidator.ValidateAsync(idToken)
+            ?? throw new ApiException(StatusCodes.Status401Unauthorized, "Google sign-in failed",
+                "We could not verify your Google sign-in. Please try again.");
+
+        var user = await FindOrCreateGoogleUserAsync(identity, cancellationToken);
+        return await StartSessionAsync(user, "Google", cancellationToken);
+    }
+
+    // ---------------- Session ----------------
 
     public async Task<AuthSession> RefreshAsync(string refreshToken, CancellationToken cancellationToken)
     {
@@ -66,12 +84,11 @@ public sealed class AuthService(
             ?? throw new ApiException(StatusCodes.Status401Unauthorized, "Session expired",
                 "Your session has expired. Please sign in again.");
 
-        // A user who never completed OTP must not get a session, even with a token.
+        // Defence in depth: a session only ever exists for a proven email address.
         if (!rotated.User.IsEmailVerified)
         {
             await refreshTokenService.RevokeAsync(rotated.Next.Token, cancellationToken);
-            throw new ApiException(StatusCodes.Status401Unauthorized, "Session expired",
-                "Please sign in again and verify your email.");
+            throw new ApiException(StatusCodes.Status401Unauthorized, "Session expired", "Please sign in again.");
         }
 
         return CreateSession(rotated.User, rotated.Next);
@@ -85,6 +102,89 @@ public sealed class AuthService(
         }
     }
 
+    // ---------------- Helpers ----------------
+
+    private async Task<OtpSentResponse> IssueOtpAsync(string email, bool explicitResend, CancellationToken cancellationToken)
+    {
+        // The name only personalises the email; the response is identical whether or not an account exists.
+        var existing = await userRepository.GetByEmailAsync(email, cancellationToken);
+        var issue = await otpService.IssueAsync(email, existing?.FullName, explicitResend, cancellationToken);
+
+        return new OtpSentResponse(email, issue.CodeSent, issue.ExpiresInSeconds, issue.ResendAvailableInSeconds,
+            issue.CodeSent
+                ? $"We sent a 6-digit code to {email}. It expires in {issue.ExpiresInSeconds / 60} minutes."
+                : $"A code was already sent to {email}. Check your inbox and spam folder.");
+    }
+
+    private async Task<User> FindOrCreateGoogleUserAsync(GoogleIdentity identity, CancellationToken cancellationToken)
+    {
+        // 1. Returning Google user.
+        var user = await userRepository.GetByGoogleIdAsync(identity.GoogleId, cancellationToken);
+        if (user is not null)
+        {
+            if (user.Email != identity.Email)
+            {
+                // The Google account's address changed; it must not take over another account's email.
+                var owner = await userRepository.GetByEmailAsync(identity.Email, cancellationToken);
+                if (owner is not null && owner.UserId != user.UserId)
+                {
+                    throw EmailConflict();
+                }
+                user.Email = identity.Email;
+            }
+            user.IsEmailVerified = true;
+            user.ProfileImageUrl = identity.PictureUrl ?? user.ProfileImageUrl;
+            await userRepository.SaveChangesAsync(cancellationToken);
+            return user;
+        }
+
+        // 2. Existing account with this (Google-verified) email.
+        var byEmail = await userRepository.GetByEmailAsync(identity.Email, cancellationToken);
+        if (byEmail is not null)
+        {
+            if (byEmail.GoogleId is not null)
+            {
+                // Same email but a different Google account: never merge silently.
+                logger.LogWarning("Google sign-in rejected: email of user {UserId} belongs to another Google account", byEmail.UserId);
+                throw EmailConflict();
+            }
+
+            // Google has verified that this person owns the mailbox, so link it to the email-OTP account.
+            byEmail.GoogleId = identity.GoogleId;
+            byEmail.IsEmailVerified = true;
+            byEmail.ProfileImageUrl ??= identity.PictureUrl;
+            await userRepository.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Linked Google account to user {UserId}", byEmail.UserId);
+            return byEmail;
+        }
+
+        // 3. New user.
+        user = new User
+        {
+            GoogleId = identity.GoogleId,
+            Email = identity.Email,
+            FullName = identity.FullName,
+            ProfileImageUrl = identity.PictureUrl,
+            IsEmailVerified = true,
+        };
+        userRepository.Add(user);
+        if (await TrySaveAsync(cancellationToken))
+        {
+            logger.LogInformation("Registered user {UserId} via Google", user.UserId);
+            return user;
+        }
+
+        // A parallel first sign-in created it a moment ago.
+        return await userRepository.GetByGoogleIdAsync(identity.GoogleId, cancellationToken) ?? throw RetryLater();
+    }
+
+    private async Task<AuthSession> StartSessionAsync(User user, string method, CancellationToken cancellationToken)
+    {
+        var refreshToken = await refreshTokenService.IssueAsync(user.UserId, cancellationToken);
+        logger.LogInformation("User {UserId} signed in with {Method}", user.UserId, method);
+        return CreateSession(user, refreshToken);
+    }
+
     private AuthSession CreateSession(User user, IssuedRefreshToken refreshToken)
     {
         var accessToken = tokenService.CreateAccessToken(user);
@@ -93,79 +193,42 @@ public sealed class AuthService(
             refreshToken);
     }
 
-    private async Task<User> UpsertUserAsync(GoogleIdentity identity, CancellationToken cancellationToken)
+    /// <summary>False when a unique index (Email / GoogleId) rejected a duplicate created concurrently.</summary>
+    private async Task<bool> TrySaveAsync(CancellationToken cancellationToken)
     {
-        var user = await userRepository.GetByGoogleIdAsync(identity.GoogleId, cancellationToken);
-
-        if (user is null)
-        {
-            var existingByEmail = await userRepository.GetByEmailAsync(identity.Email, cancellationToken);
-            if (existingByEmail is not null)
-            {
-                // Same email, different Google account: never merge silently.
-                logger.LogWarning("Google account {GoogleId} tried to sign in with an email owned by user {UserId}",
-                    identity.GoogleId, existingByEmail.UserId);
-                throw EmailConflict();
-            }
-
-            user = new User
-            {
-                GoogleId = identity.GoogleId,
-                Email = identity.Email,
-                FullName = identity.FullName,
-                ProfileImageUrl = identity.PictureUrl,
-            };
-            userRepository.Add(user);
-        }
-        else
-        {
-            // Keep the profile in sync with Google. A changed email must not collide with another account.
-            if (user.Email != identity.Email)
-            {
-                var owner = await userRepository.GetByEmailAsync(identity.Email, cancellationToken);
-                if (owner is not null && owner.UserId != user.UserId)
-                {
-                    throw EmailConflict();
-                }
-
-                user.Email = identity.Email;
-                user.IsEmailVerified = false;
-            }
-
-            user.FullName = identity.FullName;
-            user.ProfileImageUrl = identity.PictureUrl;
-        }
-
         try
         {
             await userRepository.SaveChangesAsync(cancellationToken);
+            return true;
         }
         catch (DbUpdateException ex) when (ex.InnerException is SqlException { Number: 2601 or 2627 })
         {
-            // Two first-time sign-ins raced; the unique index on Email/GoogleId stopped the duplicate.
-            throw new ApiException(StatusCodes.Status409Conflict, "Please try again",
-                "Your account is being set up. Please sign in again.");
+            userRepository.DiscardPendingChanges();
+            return false;
         }
-
-        return user;
     }
-
-    private async Task<User> GetChallengedUserAsync(string challengeToken, CancellationToken cancellationToken)
-    {
-        var userId = challengeProtector.TryRead(challengeToken);
-        var user = userId is null ? null : await userRepository.GetByIdAsync(userId.Value, cancellationToken);
-
-        return user ?? throw new ApiException(StatusCodes.Status401Unauthorized, "Verification session expired",
-            "Your verification session has expired. Please sign in with Google again.");
-    }
-
-    private OtpChallengeResponse ToChallengeResponse(User user, OtpIssueResult issue) =>
-        new(challengeProtector.Create(user.UserId), MaskEmail(user.Email), issue.CodeSent,
-            issue.ExpiresInSeconds, issue.ResendAvailableInSeconds);
 
     private static ApiException EmailConflict() =>
         new(StatusCodes.Status409Conflict, "Email already in use",
             "This email address is already linked to a different Google account.");
+
+    private static ApiException RetryLater() =>
+        new(StatusCodes.Status409Conflict, "Please try again", "Your account is being set up. Please sign in again.");
+
+    internal static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+
+    /// <summary>A friendly starting name from the address ("akansha.jha99@gmail.com" -> "Akansha Jha"); editable in Profile.</summary>
+    internal static string NameFromEmail(string email)
+    {
+        var local = email.Split('@')[0];
+        var words = local
+            .Split(['.', '_', '-', '+'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => new string(w.Where(char.IsLetter).ToArray()))
+            .Where(w => w.Length > 0)
+            .Select(w => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(w.ToLowerInvariant()));
+        var name = string.Join(' ', words);
+        return name.Length > 0 ? name[..Math.Min(name.Length, 200)] : local[..Math.Min(local.Length, 200)];
+    }
 
     /// <summary>"akansha@gmail.com" -> "ak*****@gmail.com"</summary>
     internal static string MaskEmail(string email)

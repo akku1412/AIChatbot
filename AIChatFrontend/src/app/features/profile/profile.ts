@@ -100,7 +100,7 @@ export class Profile {
   protected async logout(): Promise<void> {
     const confirmed = await this.confirmDialog.confirm({
       title: 'Log out?',
-      message: 'You will need to sign in with Google and verify a new email code next time.',
+      message: 'You will need to sign in again (with Google or an email code) next time.',
       confirmText: 'Log out',
     });
     if (confirmed) {

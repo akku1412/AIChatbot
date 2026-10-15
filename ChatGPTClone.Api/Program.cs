@@ -87,7 +87,14 @@ builder.Services.AddAuthorizationBuilder()
 
 // ---------- Application services ----------
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddDataProtection().SetApplicationName("ChatGPTClone");
+// Data Protection encrypts the OTP challenge tokens. In production set DataProtection:KeysPath to a
+// persistent folder (shared by all instances), or restarts would invalidate in-flight sign-ins.
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName("ChatGPTClone");
+var keysPath = builder.Configuration["DataProtection:KeysPath"];
+if (!string.IsNullOrWhiteSpace(keysPath))
+{
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+}
 
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IOtpRepository, OtpRepository>();
@@ -147,35 +154,22 @@ builder.Services.AddCors(o => o.AddPolicy(CorsSettings.PolicyName, policy =>
 // ---------- Rate limiting (global per-IP, plus a stricter per-IP policy on auth/OTP endpoints) ----------
 builder.Services.AddRateLimiter(o =>
 {
+    var limits = builder.Configuration.GetSection(RateLimitOptions.SectionName).Get<RateLimitOptions>() ?? new RateLimitOptions();
+    static FixedWindowRateLimiterOptions PerMinute(int permits) =>
+        new() { PermitLimit = permits, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 };
+
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.AddPolicy(RateLimitPolicies.Auth, ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
-            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-            }));
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => PerMinute(limits.AuthPerMinute)));
     // AI calls cost money: limit per signed-in user (falls back to IP), not just per IP.
     o.AddPolicy(RateLimitPolicies.AiChat, ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 20,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-            }));
+            _ => PerMinute(limits.AiChatPerMinute)));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
-            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 100,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-            }));
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => PerMinute(limits.GlobalPerMinute)));
     o.OnRejected = async (context, cancellationToken) =>
     {
         var problem = new ProblemDetails
@@ -225,6 +219,13 @@ else
 }
 
 app.UseHttpsRedirection();
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// Production: the built Angular app is served from wwwroot by this same site, so the HttpOnly
+// refresh cookie stays same-origin. (In development Angular's dev server proxies /api instead.)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseCors(CorsSettings.PolicyName);
 app.UseAuthentication(); // before the rate limiter, so per-user policies can see the user
 app.UseRateLimiter();
@@ -232,4 +233,18 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Unknown /api URLs must stay JSON 404s, never the SPA's index.html.
+app.MapFallback("/api/{**path}", () => Results.Problem(
+        statusCode: StatusCodes.Status404NotFound, title: "Not found", detail: "This API endpoint does not exist."))
+    .AllowAnonymous();
+
+// Client-side routes (/chat/42, /profile, ...) load the SPA; Angular's guards handle sign-in.
+if (File.Exists(Path.Combine(app.Environment.WebRootPath ?? "wwwroot", "index.html")))
+{
+    app.MapFallbackToFile("index.html").AllowAnonymous();
+}
+
 app.Run();
+
+/// <summary>Exposed for WebApplicationFactory in the integration tests.</summary>
+public partial class Program;

@@ -109,6 +109,11 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2(3)");
 
@@ -123,13 +128,10 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .IsUnicode(false)
                         .HasColumnType("varchar(128)");
 
-                    b.Property<int>("UserId")
-                        .HasColumnType("int");
-
                     b.HasKey("OtpVerificationId");
 
-                    b.HasIndex("UserId", "IsUsed", "CreatedAt")
-                        .HasDatabaseName("IX_OtpVerifications_UserId_IsUsed_CreatedAt");
+                    b.HasIndex("Email", "IsUsed", "CreatedAt")
+                        .HasDatabaseName("IX_OtpVerifications_Email_IsUsed_CreatedAt");
 
                     b.ToTable("OtpVerifications", null, t =>
                         {
@@ -197,7 +199,6 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("GoogleId")
-                        .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
@@ -221,7 +222,8 @@ namespace ChatGPTClone.Api.Data.Migrations
 
                     b.HasIndex("GoogleId")
                         .IsUnique()
-                        .HasDatabaseName("UX_Users_GoogleId");
+                        .HasDatabaseName("UX_Users_GoogleId")
+                        .HasFilter("[GoogleId] IS NOT NULL");
 
                     b.ToTable("Users", (string)null);
                 });
@@ -248,17 +250,6 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("Conversation");
                 });
 
-            modelBuilder.Entity("ChatGPTClone.Api.Models.OtpVerification", b =>
-                {
-                    b.HasOne("ChatGPTClone.Api.Models.User", "User")
-                        .WithMany("OtpVerifications")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("ChatGPTClone.Api.Models.RefreshToken", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
@@ -278,8 +269,6 @@ namespace ChatGPTClone.Api.Data.Migrations
             modelBuilder.Entity("ChatGPTClone.Api.Models.User", b =>
                 {
                     b.Navigation("Conversations");
-
-                    b.Navigation("OtpVerifications");
 
                     b.Navigation("RefreshTokens");
                 });

@@ -17,12 +17,13 @@ public sealed class OtpService(
 {
     private readonly OtpOptions _options = options.Value;
 
-    public async Task<OtpIssueResult> IssueAsync(User user, bool explicitResend, CancellationToken cancellationToken)
+    public async Task<OtpIssueResult> IssueAsync(string email, string? recipientName, bool explicitResend,
+        CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
 
         // Resend cooldown.
-        var lastCreatedAt = await otpRepository.GetLatestCreatedAtAsync(user.UserId, cancellationToken);
+        var lastCreatedAt = await otpRepository.GetLatestCreatedAtAsync(email, cancellationToken);
         var cooldownRemaining = lastCreatedAt is null
             ? 0
             : SecondsUntil(lastCreatedAt.Value.AddSeconds(_options.ResendCooldownSeconds), now);
@@ -37,15 +38,15 @@ public sealed class OtpService(
             }
 
             // Repeated sign-in moments after a code was sent: keep using the code already in the inbox.
-            var active = await otpRepository.GetLatestActiveAsync(user.UserId, now, cancellationToken);
+            var active = await otpRepository.GetLatestActiveAsync(email, now, cancellationToken);
             if (active is not null)
             {
                 return new OtpIssueResult(false, SecondsUntil(active.ExpiresAt, now), cooldownRemaining);
             }
         }
 
-        // Hourly cap per user (on top of the per-IP rate limiter).
-        var recent = await otpRepository.GetCreatedTimesSinceAsync(user.UserId, now.AddHours(-1), cancellationToken);
+        // Hourly cap per email address (on top of the per-IP rate limiter).
+        var recent = await otpRepository.GetCreatedTimesSinceAsync(email, now.AddHours(-1), cancellationToken);
         if (recent.Count >= _options.MaxSendsPerHour)
         {
             var retryAfter = Math.Max(1, SecondsUntil(recent[0].AddHours(1), now));
@@ -53,7 +54,7 @@ public sealed class OtpService(
             // On sign-in, a still-valid code already in the inbox is better than a hard stop.
             if (!explicitResend)
             {
-                var active = await otpRepository.GetLatestActiveAsync(user.UserId, now, cancellationToken);
+                var active = await otpRepository.GetLatestActiveAsync(email, now, cancellationToken);
                 if (active is not null)
                 {
                     return new OtpIssueResult(false, SecondsUntil(active.ExpiresAt, now), retryAfter);
@@ -66,13 +67,13 @@ public sealed class OtpService(
         }
 
         // A new code always invalidates every older one.
-        await otpRepository.InvalidateAllActiveAsync(user.UserId, cancellationToken);
+        await otpRepository.InvalidateAllActiveAsync(email, cancellationToken);
 
         var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
         var otp = new OtpVerification
         {
-            UserId = user.UserId,
-            OtpHash = hasher.Hash(user.UserId, code),
+            Email = email,
+            OtpHash = hasher.Hash(email, code),
             ExpiresAt = now.AddMinutes(_options.ExpiryMinutes),
         };
         otpRepository.Add(otp);
@@ -81,9 +82,9 @@ public sealed class OtpService(
         try
         {
             await emailSender.SendAsync(
-                user.Email, user.FullName, OtpEmailTemplate.Subject,
-                OtpEmailTemplate.Html(user.FullName, code, _options.ExpiryMinutes),
-                OtpEmailTemplate.Text(user.FullName, code, _options.ExpiryMinutes),
+                email, recipientName ?? string.Empty, OtpEmailTemplate.Subject,
+                OtpEmailTemplate.Html(recipientName, code, _options.ExpiryMinutes),
+                OtpEmailTemplate.Text(recipientName, code, _options.ExpiryMinutes),
                 cancellationToken);
         }
         catch (EmailDeliveryException)
@@ -94,15 +95,16 @@ public sealed class OtpService(
                 "We could not send the code to your email right now. Please try again in a few minutes.");
         }
 
-        logger.LogInformation("Sent OTP {OtpVerificationId} to user {UserId}", otp.OtpVerificationId, user.UserId);
+        // Never log the address or the code.
+        logger.LogInformation("Sent OTP {OtpVerificationId}", otp.OtpVerificationId);
 
         return new OtpIssueResult(true, _options.ExpiryMinutes * 60, _options.ResendCooldownSeconds);
     }
 
-    public async Task VerifyAsync(User user, string code, CancellationToken cancellationToken)
+    public async Task VerifyAsync(string email, string code, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var otp = await otpRepository.GetLatestActiveAsync(user.UserId, now, cancellationToken);
+        var otp = await otpRepository.GetLatestActiveAsync(email, now, cancellationToken);
 
         if (otp is null)
         {
@@ -117,7 +119,7 @@ public sealed class OtpService(
             throw TooManyAttempts();
         }
 
-        if (hasher.Verify(user.UserId, code, otp.OtpHash))
+        if (hasher.Verify(email, code, otp.OtpHash))
         {
             // Atomic single-use: if two requests race with the right code, only one wins.
             if (!await otpRepository.TryMarkUsedAsync(otp.OtpVerificationId, cancellationToken))
@@ -127,7 +129,7 @@ public sealed class OtpService(
                     new Dictionary<string, object?> { ["reason"] = "expired" });
             }
 
-            logger.LogInformation("OTP {OtpVerificationId} verified for user {UserId}", otp.OtpVerificationId, user.UserId);
+            logger.LogInformation("OTP {OtpVerificationId} verified", otp.OtpVerificationId);
             return;
         }
 
@@ -137,8 +139,8 @@ public sealed class OtpService(
         }
 
         var attemptsRemaining = _options.MaxAttempts - (otp.AttemptCount + 1);
-        logger.LogInformation("Wrong OTP for user {UserId}; {AttemptsRemaining} attempts remaining",
-            user.UserId, attemptsRemaining);
+        logger.LogInformation("Wrong code for OTP {OtpVerificationId}; {AttemptsRemaining} attempts remaining",
+            otp.OtpVerificationId, attemptsRemaining);
 
         if (attemptsRemaining <= 0)
         {

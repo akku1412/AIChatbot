@@ -6,19 +6,21 @@ export interface User {
   email: string;
   profileImageUrl: string | null;
   isEmailVerified: boolean;
+  /** True when a Google account is linked (signed in with Google at least once). */
+  hasGoogleAccount: boolean;
   createdAt: string;
 }
 
-/** Returned by POST /api/auth/google and /api/auth/send-otp. */
-export interface OtpChallenge {
-  challengeToken: string;
-  maskedEmail: string;
+/** Returned by POST /api/auth/send-otp and /api/auth/resend-otp. */
+export interface OtpSent {
+  email: string;
   codeSent: boolean;
   expiresInSeconds: number;
   resendAvailableInSeconds: number;
+  message: string;
 }
 
-/** Returned by POST /api/auth/verify-otp and /api/auth/refresh. The refresh token is an HttpOnly cookie. */
+/** Returned by verify-otp, google and refresh. The refresh token is an HttpOnly cookie, never in the body. */
 export interface AuthResponse {
   accessToken: string;
   accessTokenExpiresAt: string;

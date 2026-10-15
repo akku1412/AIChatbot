@@ -4,8 +4,11 @@ public class User : IAuditable
 {
     public int UserId { get; set; }
 
-    /// <summary>Google account identifier (the "sub" claim). Never changes for a Google account.</summary>
-    public string GoogleId { get; set; } = string.Empty;
+    /// <summary>
+    /// Google account identifier (the "sub" claim), i.e. the Google subject id. Null for accounts created
+    /// with email OTP until the user signs in with Google using the same email (then it is linked).
+    /// </summary>
+    public string? GoogleId { get; set; }
 
     public string FullName { get; set; } = string.Empty;
 
@@ -14,13 +17,12 @@ public class User : IAuditable
 
     public string? ProfileImageUrl { get; set; }
 
-    /// <summary>True once the user has completed email OTP verification at least once.</summary>
+    /// <summary>True once the address was proven: an email OTP was verified, or Google reported it verified.</summary>
     public bool IsEmailVerified { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    public ICollection<OtpVerification> OtpVerifications { get; set; } = new List<OtpVerification>();
     public ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

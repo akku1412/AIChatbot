@@ -76,7 +76,13 @@
 
         <div class="field">
           <span class="label">Sign-in method</span>
-          <span class="value">Google account + email verification code</span>
+          <span class="value">
+            @if (u.hasGoogleAccount) {
+              Google account, or a one-time code sent to this email
+            } @else {
+              One-time code sent to this email
+            }
+          </span>
         </div>
 
         <div class="field">

@@ -6,9 +6,9 @@ internal static class OtpEmailTemplate
 {
     public const string Subject = "Your AIChat verification code";
 
-    public static string Html(string fullName, string code, int expiryMinutes)
+    public static string Html(string? fullName, string code, int expiryMinutes)
     {
-        var name = WebUtility.HtmlEncode(fullName);
+        var name = string.IsNullOrWhiteSpace(fullName) ? "there" : WebUtility.HtmlEncode(fullName);
         return $"""
             <!doctype html>
             <html><body style="margin:0;padding:24px;background:#f7f7f8;font-family:Segoe UI,Arial,sans-serif;color:#1f1f24">
@@ -25,9 +25,9 @@ internal static class OtpEmailTemplate
             """;
     }
 
-    public static string Text(string fullName, string code, int expiryMinutes) =>
+    public static string Text(string? fullName, string code, int expiryMinutes) =>
         $"""
-        Hi {fullName},
+        Hi {(string.IsNullOrWhiteSpace(fullName) ? "there" : fullName)},
 
         Your AIChat verification code is: {code}
 

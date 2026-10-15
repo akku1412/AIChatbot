@@ -44,6 +44,6 @@ public interface IOtpChallengeProtector
 
 public interface IOtpHasher
 {
-    string Hash(int userId, string code);
-    bool Verify(int userId, string code, string storedHash);
+    string Hash(string email, string code);
+    bool Verify(string email, string code, string storedHash);
 }

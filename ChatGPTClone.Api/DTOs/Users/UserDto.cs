@@ -8,8 +8,10 @@ public sealed record UserDto(
     string Email,
     string? ProfileImageUrl,
     bool IsEmailVerified,
+    bool HasGoogleAccount,
     DateTime CreatedAt)
 {
     public static UserDto From(User user) =>
-        new(user.UserId, user.FullName, user.Email, user.ProfileImageUrl, user.IsEmailVerified, user.CreatedAt);
+        new(user.UserId, user.FullName, user.Email, user.ProfileImageUrl, user.IsEmailVerified,
+            user.GoogleId is not null, user.CreatedAt);
 }

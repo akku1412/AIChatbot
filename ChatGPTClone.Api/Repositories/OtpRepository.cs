@@ -7,29 +7,30 @@ namespace ChatGPTClone.Api.Repositories;
 
 public sealed class OtpRepository(AppDbContext db) : IOtpRepository
 {
-    public Task<OtpVerification?> GetLatestActiveAsync(int userId, DateTime utcNow, CancellationToken cancellationToken) =>
+    public Task<OtpVerification?> GetLatestActiveAsync(string email, DateTime utcNow, CancellationToken cancellationToken) =>
         db.OtpVerifications
-            .Where(o => o.UserId == userId && !o.IsUsed && o.ExpiresAt > utcNow)
+            .Where(o => o.Email == email && !o.IsUsed && o.ExpiresAt > utcNow)
             .OrderByDescending(o => o.CreatedAt)
+            .ThenByDescending(o => o.OtpVerificationId)
             .FirstOrDefaultAsync(cancellationToken);
 
-    public async Task<DateTime?> GetLatestCreatedAtAsync(int userId, CancellationToken cancellationToken) =>
+    public async Task<DateTime?> GetLatestCreatedAtAsync(string email, CancellationToken cancellationToken) =>
         await db.OtpVerifications
-            .Where(o => o.UserId == userId)
+            .Where(o => o.Email == email)
             .OrderByDescending(o => o.CreatedAt)
             .Select(o => (DateTime?)o.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-    public Task<List<DateTime>> GetCreatedTimesSinceAsync(int userId, DateTime sinceUtc, CancellationToken cancellationToken) =>
+    public Task<List<DateTime>> GetCreatedTimesSinceAsync(string email, DateTime sinceUtc, CancellationToken cancellationToken) =>
         db.OtpVerifications
-            .Where(o => o.UserId == userId && o.CreatedAt >= sinceUtc)
+            .Where(o => o.Email == email && o.CreatedAt >= sinceUtc)
             .OrderBy(o => o.CreatedAt)
             .Select(o => o.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public Task<int> InvalidateAllActiveAsync(int userId, CancellationToken cancellationToken) =>
+    public Task<int> InvalidateAllActiveAsync(string email, CancellationToken cancellationToken) =>
         db.OtpVerifications
-            .Where(o => o.UserId == userId && !o.IsUsed)
+            .Where(o => o.Email == email && !o.IsUsed)
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.IsUsed, true), cancellationToken);
 
     public async Task<bool> TryMarkUsedAsync(int otpVerificationId, CancellationToken cancellationToken) =>

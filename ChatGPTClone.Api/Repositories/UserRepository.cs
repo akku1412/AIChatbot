@@ -19,4 +19,12 @@ public sealed class UserRepository(AppDbContext db) : IUserRepository
     public void Add(User user) => db.Users.Add(user);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
+
+    public void DiscardPendingChanges()
+    {
+        foreach (var entry in db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
 }
