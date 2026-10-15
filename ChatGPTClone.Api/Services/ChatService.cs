@@ -124,7 +124,7 @@ public sealed class ChatService(
                 new AiChatMessage(MessageRole.User, Truncate(userText, 1000)),
                 new AiChatMessage(MessageRole.Assistant, Truncate(assistantText, 1000)),
                 new AiChatMessage(MessageRole.User, "Title:"),
-            ], 30, cancellationToken);
+            ], 60, cancellationToken);
 
             var title = CleanTitle(result.Content);
             if (title.Length > 0)

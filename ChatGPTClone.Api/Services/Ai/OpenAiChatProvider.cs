@@ -5,6 +5,10 @@ using ChatGPTClone.Api.Models;
 using OpenAI;
 using OpenAI.Chat;
 
+// reasoning_effort is a standard Chat Completions parameter (OpenAI and Groq), but the SDK still marks
+// its .NET type as "evaluation" (OPENAI001). It is only sent when ReasoningEffort is configured.
+#pragma warning disable OPENAI001
+
 namespace ChatGPTClone.Api.Services.Ai;
 
 /// <summary>
@@ -14,6 +18,7 @@ namespace ChatGPTClone.Api.Services.Ai;
 public sealed class OpenAiChatProvider : IAiChatProvider
 {
     private readonly ChatClient? _client;
+    private readonly ChatReasoningEffortLevel? _reasoningEffort;
     private readonly ILogger<OpenAiChatProvider> _logger;
 
     public OpenAiChatProvider(string name, OpenAiProviderOptions settings, int timeoutSeconds,
@@ -21,6 +26,10 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     {
         Name = name;
         _logger = logger;
+        if (!string.IsNullOrWhiteSpace(settings.ReasoningEffort))
+        {
+            _reasoningEffort = new ChatReasoningEffortLevel(settings.ReasoningEffort.Trim().ToLowerInvariant());
+        }
         if (string.IsNullOrWhiteSpace(settings.ApiKey))
         {
             return; // Not configured: CompleteAsync reports it clearly instead of failing at startup.
@@ -57,7 +66,7 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         {
             completion = await _client.CompleteChatAsync(
                 chatMessages,
-                new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens },
+                new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = _reasoningEffort },
                 cancellationToken);
         }
         catch (ClientResultException ex)

@@ -56,4 +56,10 @@ public sealed class OpenAiProviderOptions
 
     /// <summary>Base URL of an OpenAI-compatible API. Empty = api.openai.com.</summary>
     public string? Endpoint { get; set; }
+
+    /// <summary>
+    /// For reasoning models only ("low", "medium", "high"). Without it, short outputs such as titles can spend
+    /// their whole token budget on hidden reasoning and come back empty. Leave empty for other models.
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
 }
