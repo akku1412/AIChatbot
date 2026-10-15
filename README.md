@@ -1,0 +1,204 @@
+# AIChat
+
+A ChatGPT-style chat app: **Angular 21** frontend, **ASP.NET Core 8** Web API, **SQL Server**, EF Core, and an
+OpenAI-compatible AI provider (Groq or OpenAI). Sign-in is passwordless: **email one-time code** or **Google**.
+
+```
+AIChatFrontend/          Angular app (login, code page, chat dashboard, profile)
+ChatGPTClone.Api/        ASP.NET Core API (auth, conversations, chat, users)
+ChatGPTClone.Api.Tests/  xUnit unit + integration tests
+database/                Generated SQL schema script
+publish.ps1              Builds a deployable package (API + Angular in wwwroot)
+set-groq-key.cmd         Stores a Groq API key in user secrets (hidden input)
+```
+
+## Sign-in flows
+
+| Flow | Steps | Result |
+|---|---|---|
+| **Email OTP** | `send-otp` → 6-digit code emailed → `verify-otp` | Session starts. A new email gets an account only after the code is verified. |
+| **Google** | Google button → ID token → `google` (validated on the server) | Session starts immediately, no OTP. |
+
+One account per email address. Signing in with Google using the email of an existing email-OTP account **links**
+Google to that account (same chats). A *different* Google account claiming an already-linked email is refused (409).
+
+A session is a 15-minute JWT access token (kept in memory by Angular) plus a 7-day refresh token in an
+`HttpOnly; Secure; SameSite=Strict` cookie scoped to `/api/auth`. Refresh tokens rotate on every use and are stored
+only as SHA-256 hashes; reusing a revoked one revokes all of that user's sessions.
+
+**OTP rules:** cryptographically random 6 digits · stored as salted HMAC-SHA256 (never plain text) · expires after
+5 minutes · single use · max 5 wrong attempts per code · 60-second resend cooldown · a new code invalidates the old
+one · max 5 codes per email per hour (20 in Development) · auth endpoints limited to 10 requests/minute per IP ·
+identical responses for new and existing addresses (no account enumeration).
+
+## Prerequisites
+
+- .NET SDK 8 or 9 (projects target `net8.0`), Node.js 22, SQL Server (2016+)
+- `dotnet tool restore` in `ChatGPTClone.Api` installs the matching `dotnet-ef` (8.0.31)
+
+## Local setup
+
+### 1. Secrets (never in source control)
+
+Secrets live in .NET **User Secrets** (`%APPDATA%\Microsoft\UserSecrets\a2b3b8dd-7264-4cb9-99ea-6a3e093c11c6\secrets.json`).
+From `ChatGPTClone.Api`:
+
+```powershell
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=YOUR-PC\SQL2016;Database=ChatGPTCloneDB;Trusted_Connection=True;TrustServerCertificate=True"
+dotnet user-secrets set "Smtp:Username"  "you@gmail.com"
+dotnet user-secrets set "Smtp:FromEmail" "you@gmail.com"
+dotnet user-secrets set "Smtp:Password"  "<16-character Gmail App Password, no spaces>"
+dotnet user-secrets set "Otp:HashKey"    "<base64 of 32+ random bytes>"
+dotnet user-secrets set "Jwt:SigningKey" "<base64 of 64 random bytes>"
+```
+
+AI key: double-click `set-groq-key.cmd` (Groq) or set `Ai:OpenAI:ApiKey` and `Ai:Provider=OpenAI`.
+
+Generate a random base64 key in PowerShell:
+`[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(64))`
+
+### 2. Gmail SMTP (App Password)
+
+1. Turn on **2-Step Verification** for the sending Google account: <https://myaccount.google.com/signinoptions/twosv>
+2. Create an App Password: <https://myaccount.google.com/apppasswords> (name it "AIChat").
+3. Store the 16 characters (without spaces) as `Smtp:Password`. **Never use the normal Gmail password.**
+
+Host/port are in `appsettings.json` (`smtp.gmail.com`, `587`, STARTTLS). Any SMTP provider works: change
+`Smtp:Host`/`Smtp:Port` (port 465 uses implicit TLS). Gmail allows roughly 500 messages/day; use a transactional
+provider for production volumes.
+
+### 3. Google OAuth client
+
+1. <https://console.cloud.google.com/auth/clients> → **Create client** → *Web application*.
+2. **Authorized JavaScript origins:** `http://localhost:4200`, `http://localhost`, and your production origin
+   (e.g. `https://aichat.example.com`). No redirect URIs are needed (Google Identity Services popup).
+3. Put the **Client ID** (public) in `ChatGPTClone.Api/appsettings.json` → `GoogleAuth:ClientId` and in
+   `AIChatFrontend/src/environments/environment*.ts` → `googleClientId`. The client **secret is not used**; don't share it.
+4. While the consent screen is in *Testing*, add users under **Audience → Test users**, or publish the app.
+
+### 4. Database
+
+```powershell
+cd ChatGPTClone.Api
+dotnet tool restore
+dotnet ef database update
+```
+
+`database/ChatGPTCloneDB.sql` is an idempotent script of all migrations (`dotnet ef migrations script --idempotent`).
+
+### 5. Run
+
+```powershell
+# terminal 1
+cd ChatGPTClone.Api;  dotnet run --launch-profile https     # https://localhost:7180  (Swagger: /swagger)
+# terminal 2
+cd AIChatFrontend;    npm start                             # http://localhost:4200  (proxies /api to the API)
+```
+
+### 6. Tests
+
+```powershell
+dotnet test ChatGPTClone.Api.Tests      # 71 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
+cd AIChatFrontend; npx ng test --watch=false
+```
+
+Integration tests replace only Google, email and AI with fakes; everything else (EF migrations, JWT, cookies, rate
+limiting, ownership checks) is real. Set `CHATGPTCLONE_TEST_DB` to use another SQL Server.
+
+## API reference
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/auth/send-otp` | – | `{ "email" }` → emails a code |
+| POST | `/api/auth/resend-otp` | – | `{ "email" }` → new code after the cooldown |
+| POST | `/api/auth/verify-otp` | – | `{ "email", "code" }` → session (registers new users) |
+| POST | `/api/auth/google` | – | `{ "idToken" }` → session |
+| POST | `/api/auth/refresh` | cookie | new access token, rotated cookie |
+| POST | `/api/auth/logout` | cookie | revokes the refresh token |
+| GET | `/api/auth/me` · `/api/users/me` | JWT | current user |
+| PUT | `/api/users/me` | JWT | `{ "fullName" }` |
+| GET/POST | `/api/conversations` | JWT | list (`?page&pageSize`) / create |
+| GET/PUT/DELETE | `/api/conversations/{id}` | JWT | get / rename `{ "title" }` / delete |
+| GET/POST | `/api/chat/{id}/messages` | JWT | list (`?limit&before`) / send `{ "content" }` |
+
+Errors are RFC 7807 `application/problem+json` with `title`, `detail`, and sometimes `reason`,
+`attemptsRemaining` or `retryAfterSeconds`.
+
+### Postman examples
+
+Use base URL `https://localhost:7180` (disable *SSL certificate verification* for the dev certificate) and keep
+Postman's cookie jar enabled so the refresh cookie is sent to `/api/auth/refresh`.
+
+```http
+POST /api/auth/send-otp
+Content-Type: application/json
+
+{ "email": "you@gmail.com" }
+```
+→ `200 { "email": "you@gmail.com", "codeSent": true, "expiresInSeconds": 300, "resendAvailableInSeconds": 60, "message": "..." }`
+
+```http
+POST /api/auth/verify-otp
+Content-Type: application/json
+
+{ "email": "you@gmail.com", "code": "123456" }
+```
+→ `200 { "accessToken": "eyJ...", "accessTokenExpiresAt": "...", "user": { ... } }` and a `Set-Cookie: aichat_refresh=...`
+→ wrong code: `400 { "title": "Incorrect code", "reason": "incorrect", "attemptsRemaining": 4 }`
+→ expired/used: `400 { "reason": "expired" }` · 5 wrong: `400 { "reason": "too_many_attempts" }`
+
+```http
+GET /api/auth/me
+Authorization: Bearer eyJ...
+```
+
+```http
+POST /api/chat/12/messages
+Authorization: Bearer eyJ...
+Content-Type: application/json
+
+{ "content": "Explain JWT refresh tokens in two sentences." }
+```
+
+Google sign-in needs a real ID token from the browser, so test it through the app (or Swagger with a token copied
+from the browser's network tab for `/api/auth/google`).
+
+## End-to-end checklist
+
+- [ ] Email: enter an address → **Send OTP** → code arrives (check spam) → enter it → chat opens.
+- [ ] New address creates an account; the same address later signs in to the same account (chats still there).
+- [ ] Wrong code shows attempts left; 5 wrong codes lock that code; **Resend** is disabled for 60 s, then works and the old code stops working.
+- [ ] A code older than 5 minutes is rejected; a used code cannot be reused.
+- [ ] **Change email** returns to the login page with the address filled in.
+- [ ] Google: **Continue with Google** → chat opens with no code; profile shows the Google photo.
+- [ ] Google with the same email as an email-OTP account → same account; Profile shows both sign-in methods.
+- [ ] Reload `/chat` → still signed in; **Log out** → `/chat` redirects to login.
+- [ ] Chat: send a message → AI reply (Markdown, code copy); rename and delete a conversation (with confirmation).
+- [ ] Another user cannot open your conversation URL (404).
+- [ ] Mobile width: login, code page, chat drawer and profile are usable.
+
+## Production configuration
+
+Never put production secrets in Angular files or `appsettings.json`. Use environment variables (double underscore
+for nesting) or a secret store:
+
+```
+ASPNETCORE_ENVIRONMENT=Production
+ConnectionStrings__DefaultConnection=...
+Jwt__SigningKey=...            Otp__HashKey=...
+Smtp__Username=...             Smtp__Password=...   Smtp__FromEmail=...
+Ai__Provider=Groq|OpenAI       Ai__Groq__ApiKey=... / Ai__OpenAI__ApiKey=...
+DataProtection__KeysPath=D:\aichat-keys      (persistent folder; shared by all instances)
+```
+
+Deploy:
+
+1. `powershell -ExecutionPolicy Bypass -File .\publish.ps1` → `publish\` contains the API with the Angular app in `wwwroot`.
+2. Copy `publish\` to the server (IIS with the ASP.NET Core Hosting Bundle 8, Azure App Service, or `dotnet ChatGPTClone.Api.dll` behind a reverse proxy).
+3. Serve over **HTTPS** only (HSTS is on outside Development). The SPA and API share one origin, so CORS is not needed;
+   leave `Cors:AllowedOrigins` empty unless another origin must call the API.
+4. Apply migrations: `dotnet ef database update` from a build machine, or run `database/ChatGPTCloneDB.sql`.
+5. Add the production origin to the Google OAuth client and publish the consent screen.
+6. Behind a load balancer/proxy, configure forwarded headers so rate limiting sees real client IPs.
+
+Security headers (CSP, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`) are added by `SecurityHeadersMiddleware`.
