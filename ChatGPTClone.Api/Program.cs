@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -54,7 +55,8 @@ builder.Services.AddOptions<JwtOptions>()
 builder.Services.AddOptions<AiOptions>()
     .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
     .ValidateDataAnnotations()
-    .Validate(o => !string.IsNullOrWhiteSpace(o.OpenAI.Model), "Ai:OpenAI:Model is required.")
+    .Validate(o => o.Provider is "OpenAI" or "Groq", "Ai:Provider must be OpenAI or Groq.")
+    .Validate(o => !string.IsNullOrWhiteSpace(o.Active.Model), "A model is required for the selected Ai:Provider.")
     .ValidateOnStart();
 
 // ---------- Authentication (JWT bearer) & authorization (signed-in by default) ----------
@@ -107,16 +109,14 @@ builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IChatService, ChatService>();
 
-// AI provider is chosen by configuration ("Ai:Provider"); add a case here to plug in another vendor.
-var aiProvider = builder.Configuration[$"{AiOptions.SectionName}:Provider"] ?? "OpenAI";
-switch (aiProvider)
+// AI provider is chosen by configuration ("Ai:Provider": OpenAI or Groq). Both speak the OpenAI API;
+// a vendor with a different API only needs another IAiChatProvider implementation here.
+builder.Services.AddSingleton<IAiChatProvider>(sp =>
 {
-    case "OpenAI":
-        builder.Services.AddSingleton<IAiChatProvider, OpenAiChatProvider>();
-        break;
-    default:
-        throw new InvalidOperationException($"Unknown Ai:Provider '{aiProvider}'. Supported: OpenAI.");
-}
+    var ai = sp.GetRequiredService<IOptions<AiOptions>>().Value;
+    return new OpenAiChatProvider(ai.Provider, ai.Active, ai.TimeoutSeconds,
+        sp.GetRequiredService<ILogger<OpenAiChatProvider>>());
+});
 
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 

@@ -34,16 +34,26 @@ public sealed class AiOptions
     public int TimeoutSeconds { get; init; } = 90;
 
     public OpenAiProviderOptions OpenAI { get; init; } = new();
+
+    /// <summary>Groq's OpenAI-compatible API (free tier available).</summary>
+    public OpenAiProviderOptions Groq { get; init; } = new();
+
+    /// <summary>Settings of the provider named by <see cref="Provider"/>.</summary>
+    public OpenAiProviderOptions Active => Provider switch
+    {
+        "Groq" => Groq,
+        _ => OpenAI,
+    };
 }
 
+/// <summary>Settings for any OpenAI-compatible chat completions API.</summary>
 public sealed class OpenAiProviderOptions
 {
     /// <summary>Secret. Empty means "not configured": the app still runs and chat returns a clear 503.</summary>
-    public string ApiKey { get; init; } = string.Empty;
+    public string ApiKey { get; set; } = string.Empty;
 
-    [Required]
-    public string Model { get; init; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
 
-    /// <summary>Optional, for OpenAI-compatible endpoints (Azure OpenAI, proxies). Empty = api.openai.com.</summary>
-    public string? Endpoint { get; init; }
+    /// <summary>Base URL of an OpenAI-compatible API. Empty = api.openai.com.</summary>
+    public string? Endpoint { get; set; }
 }
