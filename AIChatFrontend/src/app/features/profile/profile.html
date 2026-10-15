@@ -1,0 +1,102 @@
+<div class="page">
+  <div class="column">
+    <header class="page-head">
+      <h1>Profile</h1>
+      <p class="muted">Your account details. Your email and photo come from your Google account.</p>
+    </header>
+
+    @if (user(); as u) {
+      <section class="card identity" aria-label="Account">
+        @if (u.profileImageUrl && !imageFailed()) {
+          <img class="avatar" [src]="u.profileImageUrl" alt="Profile photo" referrerpolicy="no-referrer" (error)="imageFailed.set(true)" />
+        } @else {
+          <span class="avatar initials" aria-hidden="true">{{ initials() }}</span>
+        }
+        <div class="identity-text">
+          <h2>{{ u.fullName }}</h2>
+          <p class="muted">{{ u.email }}</p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="details-title">
+        <h3 id="details-title">Account details</h3>
+
+        <div class="field">
+          <span class="label" id="name-label">Display name</span>
+          @if (editing()) {
+            <form class="name-form" [formGroup]="form" (ngSubmit)="save()" novalidate>
+              <input
+                type="text"
+                [formControl]="name"
+                aria-labelledby="name-label"
+                [attr.maxlength]="nameMax"
+                [class.invalid]="name.invalid && name.touched"
+                autocomplete="name"
+                (keydown.escape)="cancelEdit()"
+              />
+              <div class="form-actions">
+                <button type="button" class="btn secondary" (click)="cancelEdit()" [disabled]="saving()">Cancel</button>
+                <button type="submit" class="btn primary" [disabled]="saving() || name.invalid">
+                  @if (saving()) {
+                    <app-loading-spinner [size]="14" label="Saving" />
+                  }
+                  Save
+                </button>
+              </div>
+              @if (name.invalid && name.touched) {
+                <p class="error" role="alert">
+                  @if (name.hasError('maxlength')) {
+                    Name must be {{ nameMax }} characters or fewer.
+                  } @else {
+                    Name is required.
+                  }
+                </p>
+              }
+            </form>
+          } @else {
+            <div class="value-row">
+              <span class="value">{{ u.fullName }}</span>
+              <button type="button" class="btn secondary small" (click)="startEdit()">Edit</button>
+            </div>
+          }
+        </div>
+
+        <div class="field">
+          <span class="label">Email</span>
+          <div class="value-row">
+            <span class="value">{{ u.email }}</span>
+            @if (u.isEmailVerified) {
+              <span class="badge" title="Verified with a one-time email code">
+                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12l5 5L20 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Verified
+              </span>
+            }
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label">Sign-in method</span>
+          <span class="value">Google account + email verification code</span>
+        </div>
+
+        <div class="field">
+          <span class="label">Member since</span>
+          <span class="value">{{ u.createdAt | date: 'longDate' }}</span>
+        </div>
+      </section>
+
+      <section class="card session" aria-labelledby="session-title">
+        <div>
+          <h3 id="session-title">Session</h3>
+          <p class="muted">Log out of AIChat on this device.</p>
+        </div>
+        <button type="button" class="btn danger-outline" (click)="logout()">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Log out
+        </button>
+      </section>
+    } @else {
+      <div class="loading"><app-loading-spinner label="Loading profile" /></div>
+    }
+  </div>
+</div>

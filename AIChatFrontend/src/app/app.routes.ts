@@ -2,8 +2,9 @@ import { Routes } from '@angular/router';
 
 import { authGuard, guestGuard, otpChallengeGuard } from './core/guards/auth.guard';
 
+const chatThread = () => import('./features/chat/chat-thread').then((m) => m.ChatThread);
+
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'chat' },
   {
     path: 'login',
     title: 'Sign in · AIChat',
@@ -19,22 +20,20 @@ export const routes: Routes = [
       import('./features/otp-verification/otp-verification').then((m) => m.OtpVerification),
   },
   {
-    path: 'chat',
+    // Signed-in area: sidebar + header layout around chat and profile pages.
+    path: '',
     canActivate: [authGuard],
     loadComponent: () => import('./features/chat/chat-layout').then((m) => m.ChatLayout),
     children: [
+      { path: '', pathMatch: 'full', redirectTo: 'chat' },
+      { path: 'chat', title: 'New chat · AIChat', loadComponent: chatThread },
+      { path: 'chat/:conversationId', title: 'AIChat', loadComponent: chatThread },
       {
-        path: '',
-        title: 'New chat · AIChat',
-        loadComponent: () => import('./features/chat/chat-thread').then((m) => m.ChatThread),
-      },
-      {
-        path: ':conversationId',
-        title: 'AIChat',
-        loadComponent: () => import('./features/chat/chat-thread').then((m) => m.ChatThread),
+        path: 'profile',
+        title: 'Profile · AIChat',
+        loadComponent: () => import('./features/profile/profile').then((m) => m.Profile),
       },
     ],
   },
-  // profile (Phase 9) is added later.
   { path: '**', redirectTo: 'chat' },
 ];

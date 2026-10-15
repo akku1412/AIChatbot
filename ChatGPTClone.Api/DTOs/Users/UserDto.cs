@@ -7,8 +7,9 @@ public sealed record UserDto(
     string FullName,
     string Email,
     string? ProfileImageUrl,
-    bool IsEmailVerified)
+    bool IsEmailVerified,
+    DateTime CreatedAt)
 {
     public static UserDto From(User user) =>
-        new(user.UserId, user.FullName, user.Email, user.ProfileImageUrl, user.IsEmailVerified);
+        new(user.UserId, user.FullName, user.Email, user.ProfileImageUrl, user.IsEmailVerified, user.CreatedAt);
 }

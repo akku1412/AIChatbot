@@ -9,7 +9,7 @@
       <p class="subtitle" role="status">{{ message }}</p>
     }
 
-    <form class="code-form" (ngSubmit)="verify()" novalidate>
+    <form class="code-form" [formGroup]="form" (ngSubmit)="verify()" novalidate>
       <fieldset class="digits" [disabled]="verifying()">
         <legend class="sr-only">6-digit verification code</legend>
         @for (control of digits.controls; track $index) {

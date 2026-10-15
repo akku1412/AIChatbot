@@ -178,6 +178,28 @@ export class ChatStore {
     );
   }
 
+  renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {
+    return this.api.renameConversation(conversationId, title).pipe(
+      tap((updated) =>
+        this.conversationList.update((list) =>
+          list.map((c) => (c.conversationId === conversationId ? updated : c)),
+        ),
+      ),
+    );
+  }
+
+  /** Deletes on the server first; the sidebar only changes once that succeeded. */
+  deleteConversation(conversationId: number): Observable<void> {
+    return this.api.deleteConversation(conversationId).pipe(
+      tap(() => {
+        this.conversationList.update((list) => list.filter((c) => c.conversationId !== conversationId));
+        if (this.activeConversationId() === conversationId) {
+          this.startNewChat();
+        }
+      }),
+    );
+  }
+
   /**
    * The first message of a new chat failed (e.g. the AI is unavailable), so the conversation created
    * for it has no messages: remove it instead of leaving an empty "New chat" in the sidebar.

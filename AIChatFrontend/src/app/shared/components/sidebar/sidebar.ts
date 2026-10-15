@@ -1,5 +1,5 @@
-import { Component, computed, input, output, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Component, ElementRef, computed, input, output, signal, viewChild } from '@angular/core';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 
 import { User } from '../../../core/auth/auth.models';
 import { ConversationSummary } from '../../../core/models/chat.models';
@@ -11,9 +11,17 @@ interface ConversationGroup {
   items: ConversationSummary[];
 }
 
+export interface RenameRequest {
+  conversationId: number;
+  title: string;
+}
+
+const TITLE_MAX = 200;
+
 @Component({
   selector: 'app-sidebar',
-  imports: [RouterLink, AppLogo, LoadingSpinner],
+  imports: [RouterLink, RouterLinkActive, AppLogo, LoadingSpinner],
+  host: { '(document:click)': 'closeMenu()', '(document:keydown.escape)': 'closeMenu()' },
   template: `
     <nav class="sidebar" aria-label="Conversations">
       <div class="top">
@@ -35,15 +43,52 @@ interface ConversationGroup {
         @for (group of groups(); track group.label) {
           <h2 class="group-label">{{ group.label }}</h2>
           @for (conversation of group.items; track conversation.conversationId) {
-            <a
-              role="listitem"
-              class="item"
-              [class.active]="conversation.conversationId === activeId()"
-              [attr.aria-current]="conversation.conversationId === activeId() ? 'page' : null"
-              [routerLink]="['/chat', conversation.conversationId]"
-              [title]="conversation.title"
-              (click)="selected.emit()"
-            >{{ conversation.title }}</a>
+            <div role="listitem" class="row" [class.active]="conversation.conversationId === activeId()"
+                 [class.menu-open]="openMenuId() === conversation.conversationId">
+              @if (editingId() === conversation.conversationId) {
+                <input
+                  #renameInput
+                  class="rename"
+                  type="text"
+                  [value]="conversation.title"
+                  [attr.maxlength]="titleMax"
+                  aria-label="Conversation title"
+                  (keydown.enter)="commitRename(conversation, $event)"
+                  (keydown.escape)="cancelRename($event)"
+                  (blur)="commitRename(conversation, $event)"
+                />
+              } @else {
+                <a
+                  class="item"
+                  [attr.aria-current]="conversation.conversationId === activeId() ? 'page' : null"
+                  [routerLink]="['/chat', conversation.conversationId]"
+                  [title]="conversation.title"
+                  (click)="selected.emit()"
+                >{{ conversation.title }}</a>
+                <button
+                  type="button"
+                  class="more-button"
+                  [attr.aria-label]="'Options for ' + conversation.title"
+                  aria-haspopup="menu"
+                  [attr.aria-expanded]="openMenuId() === conversation.conversationId"
+                  (click)="toggleMenu(conversation.conversationId, $event)"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>
+                </button>
+                @if (openMenuId() === conversation.conversationId) {
+                  <div class="menu" role="menu" (click)="$event.stopPropagation()">
+                    <button type="button" role="menuitem" (click)="startRename(conversation.conversationId)">
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                      Rename
+                    </button>
+                    <button type="button" role="menuitem" class="danger" (click)="requestDelete(conversation)">
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      Delete
+                    </button>
+                  </div>
+                }
+              }
+            </div>
           }
         }
 
@@ -63,15 +108,17 @@ interface ConversationGroup {
 
       @if (user(); as u) {
         <div class="profile">
-          @if (u.profileImageUrl && !imageFailed()) {
-            <img class="avatar" [src]="u.profileImageUrl" alt="" referrerpolicy="no-referrer" (error)="imageFailed.set(true)" />
-          } @else {
-            <span class="avatar initials" aria-hidden="true">{{ initials() }}</span>
-          }
-          <div class="who">
-            <span class="name">{{ u.fullName }}</span>
-            <span class="email">{{ u.email }}</span>
-          </div>
+          <a class="profile-link" routerLink="/profile" routerLinkActive="active" title="Your profile" (click)="selected.emit()">
+            @if (u.profileImageUrl && !imageFailed()) {
+              <img class="avatar" [src]="u.profileImageUrl" alt="" referrerpolicy="no-referrer" (error)="imageFailed.set(true)" />
+            } @else {
+              <span class="avatar initials" aria-hidden="true">{{ initials() }}</span>
+            }
+            <span class="who">
+              <span class="name">{{ u.fullName }}</span>
+              <span class="email">{{ u.email }}</span>
+            </span>
+          </a>
           <button type="button" class="icon-button" aria-label="Log out" title="Log out" (click)="logout.emit()">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
@@ -95,8 +142,14 @@ export class Sidebar {
   readonly retry = output<void>();
   readonly logout = output<void>();
   readonly closed = output<void>();
+  readonly rename = output<RenameRequest>();
+  readonly remove = output<ConversationSummary>();
 
+  protected readonly titleMax = TITLE_MAX;
   protected readonly imageFailed = signal(false);
+  protected readonly openMenuId = signal<number | null>(null);
+  protected readonly editingId = signal<number | null>(null);
+  private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
 
   protected readonly initials = computed(() =>
     (this.user()?.fullName ?? '?')
@@ -128,4 +181,46 @@ export class Sidebar {
     }
     return buckets.filter((group) => group.items.length > 0);
   });
+
+  protected toggleMenu(conversationId: number, event: MouseEvent): void {
+    event.stopPropagation(); // keep the document click handler from closing it straight away
+    this.openMenuId.update((open) => (open === conversationId ? null : conversationId));
+  }
+
+  protected closeMenu(): void {
+    this.openMenuId.set(null);
+  }
+
+  protected startRename(conversationId: number): void {
+    this.closeMenu();
+    this.editingId.set(conversationId);
+    setTimeout(() => {
+      const input = this.renameInput()?.nativeElement;
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  protected commitRename(conversation: ConversationSummary, event: Event): void {
+    if (this.editingId() !== conversation.conversationId) {
+      return; // already handled (Enter, then blur fires as the input is removed)
+    }
+    event.preventDefault();
+    const title = (event.target as HTMLInputElement).value.trim();
+    this.editingId.set(null);
+    if (title && title !== conversation.title) {
+      this.rename.emit({ conversationId: conversation.conversationId, title: title.slice(0, TITLE_MAX) });
+    }
+  }
+
+  protected cancelRename(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.editingId.set(null);
+  }
+
+  protected requestDelete(conversation: ConversationSummary): void {
+    this.closeMenu();
+    this.remove.emit(conversation);
+  }
 }

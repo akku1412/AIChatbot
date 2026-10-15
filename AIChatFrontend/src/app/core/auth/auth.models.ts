@@ -6,6 +6,7 @@ export interface User {
   email: string;
   profileImageUrl: string | null;
   isEmailVerified: boolean;
+  createdAt: string;
 }
 
 /** Returned by POST /api/auth/google and /api/auth/send-otp. */

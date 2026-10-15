@@ -9,7 +9,7 @@ import {
   signal,
   viewChildren,
 } from '@angular/core';
-import { FormArray, FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormArray, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { AuthService } from '../../core/auth/auth.service';
@@ -41,6 +41,8 @@ export class OtpVerification {
       () => new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.pattern(/^\d$/)] }),
     ),
   );
+  /** [formGroup] on the <form> is what makes (ngSubmit) work and stops a native page-reloading submit. */
+  protected readonly form = new FormGroup({ digits: this.digits });
   private readonly inputs = viewChildren<ElementRef<HTMLInputElement>>('digit');
 
   private readonly now = signal(Date.now());

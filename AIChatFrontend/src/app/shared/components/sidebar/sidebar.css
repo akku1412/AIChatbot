@@ -87,10 +87,29 @@
   color: var(--text-muted);
 }
 
-.item {
-  display: block;
-  padding: 8px 12px;
+/* One conversation: link + "more" button (+ its menu), or the rename input. */
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
   border-radius: 8px;
+}
+
+.row:hover,
+.row.menu-open {
+  background: var(--surface-hover);
+}
+
+.row.active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.item {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: 8px 4px 8px 12px;
   color: var(--text);
   text-decoration: none;
   font-size: 0.9375rem;
@@ -99,15 +118,87 @@
   text-overflow: ellipsis;
 }
 
-.item:hover {
+.row.active .item {
+  font-weight: 600;
+}
+
+.more-button {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.row:hover .more-button,
+.row.active .more-button,
+.row.menu-open .more-button,
+.more-button:focus-visible {
+  opacity: 1;
+}
+
+.more-button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  right: 4px;
+  min-width: 150px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover {
   background: var(--surface-hover);
 }
 
-.item.active {
-  background: var(--accent-soft);
+.menu .danger {
+  color: var(--danger);
+}
+
+.rename {
+  flex: 1;
+  min-width: 0;
+  margin: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface-raised);
   color: var(--text);
-  font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--accent);
+  font: inherit;
+  font-size: 0.9375rem;
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .state {
@@ -142,9 +233,26 @@
 .profile {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
+  gap: 4px;
+  padding: 10px 8px;
   border-top: 1px solid var(--border);
+}
+
+.profile-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.profile-link:hover,
+.profile-link.active {
+  background: var(--surface-hover);
 }
 
 .avatar {
@@ -191,5 +299,10 @@
 @media (max-width: 768px) {
   .close {
     display: grid;
+  }
+
+  /* No hover on touch screens: always show the options button. */
+  .more-button {
+    opacity: 1;
   }
 }
