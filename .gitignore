@@ -19,3 +19,6 @@ appsettings.*.local.json
 
 # Build output of publish.ps1
 publish/
+
+# Uploaded user files (private, never committed)
+ChatGPTClone.Api/App_Data/

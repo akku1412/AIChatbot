@@ -36,7 +36,9 @@ public sealed class MessageRepository(AppDbContext db) : IMessageRepository
     public async Task<(List<Message> Items, bool HasMore)> GetPageAsync(int conversationId, long? beforeMessageId,
         int limit, CancellationToken cancellationToken)
     {
-        var query = db.Messages.AsNoTracking().Where(m => m.ConversationId == conversationId);
+        var query = db.Messages.AsNoTracking()
+            .Include(m => m.Attachments).ThenInclude(a => a.File)
+            .Where(m => m.ConversationId == conversationId);
         if (beforeMessageId is { } before)
         {
             query = query.Where(m => m.MessageId < before);
@@ -56,12 +58,24 @@ public sealed class MessageRepository(AppDbContext db) : IMessageRepository
     public async Task<List<Message>> GetRecentAsync(int conversationId, int count, CancellationToken cancellationToken)
     {
         var newestFirst = await db.Messages.AsNoTracking()
+            .Include(m => m.Attachments).ThenInclude(a => a.File)
             .Where(m => m.ConversationId == conversationId)
             .OrderByDescending(m => m.MessageId)
             .Take(count)
             .ToListAsync(cancellationToken);
         newestFirst.Reverse();
         return newestFirst;
+    }
+
+    public async Task<List<Guid>> GetRecentAttachmentFileIdsAsync(int conversationId, int take, CancellationToken cancellationToken)
+    {
+        var rows = await db.MessageAttachments.AsNoTracking()
+            .Where(a => a.Message.ConversationId == conversationId)
+            .OrderByDescending(a => a.MessageId)
+            .Select(a => a.FileId)
+            .Take(take * 4)
+            .ToListAsync(cancellationToken);
+        return rows.Distinct().Take(take).ToList();
     }
 
     public Task<bool> AnyAsync(int conversationId, CancellationToken cancellationToken) =>

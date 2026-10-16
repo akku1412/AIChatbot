@@ -24,4 +24,6 @@ public class Message : IHasCreatedAt
     public int? TokenUsage { get; set; }
 
     public Conversation Conversation { get; set; } = null!;
+
+    public ICollection<MessageAttachment> Attachments { get; set; } = new List<MessageAttachment>();
 }

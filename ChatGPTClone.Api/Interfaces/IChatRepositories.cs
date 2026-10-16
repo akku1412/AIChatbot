@@ -26,6 +26,9 @@ public interface IMessageRepository
 
     Task<bool> AnyAsync(int conversationId, CancellationToken cancellationToken);
 
+    /// <summary>Distinct ids of files attached in this conversation, most recently attached first.</summary>
+    Task<List<Guid>> GetRecentAttachmentFileIdsAsync(int conversationId, int take, CancellationToken cancellationToken);
+
     void Add(Message message);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

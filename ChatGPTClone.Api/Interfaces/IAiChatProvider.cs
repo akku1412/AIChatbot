@@ -26,6 +26,8 @@ public enum AiFailureKind
     ContentRejected,
     Unavailable,
     EmptyResponse,
+    /// <summary>The prompt (history + documents) exceeded the model's context window.</summary>
+    ContextTooLong,
 }
 
 public sealed class AiProviderException(AiFailureKind kind, string message, Exception? innerException = null)

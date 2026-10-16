@@ -103,6 +103,10 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         var kind = ex.Status switch
         {
             401 or 403 => AiFailureKind.InvalidCredentials,
+            413 => AiFailureKind.ContextTooLong,
+            400 when ex.Message.Contains("context_length", StringComparison.OrdinalIgnoreCase)
+                  || ex.Message.Contains("maximum context", StringComparison.OrdinalIgnoreCase)
+                  || ex.Message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase) => AiFailureKind.ContextTooLong,
             429 when ex.Message.Contains("insufficient_quota", StringComparison.OrdinalIgnoreCase) => AiFailureKind.QuotaExceeded,
             429 => AiFailureKind.RateLimited,
             400 when ex.Message.Contains("content", StringComparison.OrdinalIgnoreCase)

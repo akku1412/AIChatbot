@@ -7,4 +7,7 @@ public static class RateLimitPolicies
 
     /// <summary>Per-user limit on AI messages, which cost money.</summary>
     public const string AiChat = "ai-chat";
+
+    /// <summary>Per-user limit on file uploads (each one is stored and parsed).</summary>
+    public const string Uploads = "uploads";
 }

@@ -31,6 +31,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public FakeEmailSender Email { get; } = new();
     public FakeAiProvider Ai { get; } = new();
 
+    /// <summary>Private upload folder for this test run (deleted afterwards).</summary>
+    public string StoragePath { get; } = Path.Combine(Path.GetTempPath(), "chatgptclone-tests-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>Small limit so the "too large" path is cheap to test.</summary>
+    public const long MaxFileSize = 1024 * 1024;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -45,6 +51,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("RateLimits:GlobalPerMinute", "100000");
         builder.UseSetting("RateLimits:AuthPerMinute", "100000");
         builder.UseSetting("RateLimits:AiChatPerMinute", "100000");
+        builder.UseSetting("RateLimits:UploadsPerMinute", "100000");
+        builder.UseSetting("FileUploads:StoragePath", StoragePath);
+        builder.UseSetting("FileUploads:MaxFileSizeBytes", MaxFileSize.ToString());
 
         builder.ConfigureTestServices(services =>
         {
@@ -69,6 +78,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureDeletedAsync();
         }
         await base.DisposeAsync();
+        if (Directory.Exists(StoragePath))
+        {
+            Directory.Delete(StoragePath, recursive: true);
+        }
     }
 
     /// <summary>A browser-like client: HTTPS (so Secure cookies work) with its own cookie jar.</summary>
@@ -120,6 +133,9 @@ public sealed class FakeAiProvider : IAiChatProvider
     public AiFailureKind? FailWith { get; set; }
     public ConcurrentBag<IReadOnlyList<AiChatMessage>> Prompts { get; } = [];
 
+    /// <summary>The most recent prompt (tests in a collection run one at a time).</summary>
+    public IReadOnlyList<AiChatMessage>? LastPrompt { get; private set; }
+
     public Task<AiCompletion> CompleteAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
         CancellationToken cancellationToken)
     {
@@ -134,6 +150,7 @@ public sealed class FakeAiProvider : IAiChatProvider
         }
 
         Prompts.Add(messages);
+        LastPrompt = messages; // the answer prompt, not the title prompt
         var lastUser = messages.Last(m => m.Role == MessageRole.User).Content;
         return Task.FromResult(new AiCompletion($"**Echo:** {lastUser}", 42, false));
     }
@@ -166,6 +183,18 @@ public static class TestAuth
     /// <summary>Google: the fake validator accepts "google|sub|email|name". Returns the HTTP response.</summary>
     public static Task<HttpResponseMessage> GoogleAsync(HttpClient client, string sub, string email, string name = "Google User") =>
         client.PostAsJsonAsync("/api/auth/google", new { idToken = $"google|{sub}|{email}|{name}" });
+
+    /// <summary>POST /api/files/upload with one file in the "file" form field.</summary>
+    public static Task<HttpResponseMessage> UploadAsync(HttpClient client, string token, string fileName, byte[] content)
+    {
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(content);
+        file.Headers.ContentType = new("application/octet-stream");
+        form.Add(file, "file", fileName);
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/files/upload") { Content = form };
+        request.Headers.Authorization = new("Bearer", token);
+        return client.SendAsync(request);
+    }
 
     public static HttpRequestMessage Authorized(HttpMethod method, string url, string token, object? body = null)
     {

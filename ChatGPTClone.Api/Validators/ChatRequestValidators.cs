@@ -1,4 +1,6 @@
+using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data.Configurations;
+using Microsoft.Extensions.Options;
 using ChatGPTClone.Api.DTOs.Chat;
 using FluentValidation;
 
@@ -49,11 +51,21 @@ public sealed class RenameConversationRequestValidator : AbstractValidator<Renam
 
 public sealed class SendMessageRequestValidator : AbstractValidator<SendMessageRequest>
 {
-    public SendMessageRequestValidator()
+    public SendMessageRequestValidator(IOptions<FileUploadOptions> fileOptions)
     {
+        var maxFiles = fileOptions.Value.MaxFilesPerMessage;
+
+        // A message needs text, files, or both.
         RuleFor(r => r.Content)
-            .Must(c => !string.IsNullOrWhiteSpace(c)).WithMessage("Message cannot be empty.")
+            .Must((request, content) => !string.IsNullOrWhiteSpace(content) || request.AttachmentIds is { Count: > 0 })
+            .WithMessage("Message cannot be empty.")
             .MaximumLength(ChatLimits.MaxMessageLength)
             .WithMessage($"Message must be {ChatLimits.MaxMessageLength} characters or fewer.");
+
+        RuleFor(r => r.AttachmentIds)
+            .Must(ids => ids is null || ids.Count <= maxFiles)
+            .WithMessage($"You can attach at most {maxFiles} files to one message.")
+            .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
+            .WithMessage("Invalid attachment.");
     }
 }

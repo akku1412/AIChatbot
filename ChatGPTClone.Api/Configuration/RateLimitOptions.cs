@@ -18,4 +18,8 @@ public sealed class RateLimitOptions
     /// <summary>AI messages, per signed-in user.</summary>
     [Range(1, 100_000)]
     public int AiChatPerMinute { get; init; } = 20;
+
+    /// <summary>File uploads, per signed-in user.</summary>
+    [Range(1, 100_000)]
+    public int UploadsPerMinute { get; init; } = 20;
 }

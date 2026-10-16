@@ -22,17 +22,22 @@ public sealed class ChatController(IChatService chat) : ControllerBase
         CancellationToken cancellationToken) =>
         Ok(await chat.GetMessagesAsync(User.GetUserId(), conversationId, query.Before, query.Limit, cancellationToken));
 
-    /// <summary>Saves the user's message, gets the AI reply, saves it, and returns both.</summary>
+    /// <summary>
+    /// Saves the user's message (with optional attachmentIds from POST /api/files/upload), gets the AI reply
+    /// using the attached documents as context, saves it, and returns both.
+    /// </summary>
     [HttpPost]
     [EnableRateLimiting(RateLimitPolicies.AiChat)]
     [ProducesResponseType(typeof(SendMessageResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status502BadGateway)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status504GatewayTimeout)]
     public async Task<ActionResult<SendMessageResponse>> Send(int conversationId, SendMessageRequest request,
         CancellationToken cancellationToken) =>
-        Ok(await chat.SendAsync(User.GetUserId(), conversationId, request.Content, cancellationToken));
+        Ok(await chat.SendAsync(User.GetUserId(), conversationId, request.Content, request.AttachmentIds, cancellationToken));
 }

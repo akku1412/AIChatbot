@@ -1,3 +1,4 @@
+using ChatGPTClone.Api.DTOs.Files;
 using ChatGPTClone.Api.Models;
 
 namespace ChatGPTClone.Api.DTOs.Chat;
@@ -10,10 +11,15 @@ public sealed record ConversationDto(int ConversationId, string Title, DateTime 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, bool HasMore);
 
 /// <summary>Role is serialized lower-case ("user" / "assistant") to match the database and the Angular models.</summary>
-public sealed record MessageDto(long MessageId, string Role, string Content, DateTime CreatedAt, int? TokenUsage)
+public sealed record MessageDto(long MessageId, string Role, string Content, DateTime CreatedAt, int? TokenUsage,
+    IReadOnlyList<AttachmentDto> Attachments)
 {
     public static MessageDto From(Message m) =>
-        new(m.MessageId, m.Role.ToString().ToLowerInvariant(), m.Content, m.CreatedAt, m.TokenUsage);
+        new(m.MessageId, m.Role.ToString().ToLowerInvariant(), m.Content, m.CreatedAt, m.TokenUsage,
+            m.Attachments
+                .Where(a => a.File is not null)
+                .Select(a => new AttachmentDto(a.FileId, a.File.OriginalFileName, a.File.FileExtension, a.File.FileSize))
+                .ToList());
 }
 
 /// <summary>Oldest-first page of messages; HasMore means older messages exist (use "before").</summary>
@@ -40,4 +46,5 @@ public sealed record CreateConversationRequest(string? Title);
 
 public sealed record RenameConversationRequest(string Title);
 
-public sealed record SendMessageRequest(string Content);
+/// <summary>Content may be empty when files are attached (the AI is then asked to summarize them).</summary>
+public sealed record SendMessageRequest(string? Content, IReadOnlyList<Guid>? AttachmentIds);

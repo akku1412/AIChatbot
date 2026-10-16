@@ -8,6 +8,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Repositories;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Files;
 using ChatGPTClone.Api.Validators;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -51,6 +52,9 @@ builder.Services.AddOptions<OtpOptions>()
     .ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddOptions<JwtOptions>()
     .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<FileUploadOptions>()
+    .Bind(builder.Configuration.GetSection(FileUploadOptions.SectionName))
     .ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddOptions<AiOptions>()
     .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
@@ -116,6 +120,15 @@ builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IChatService, ChatService>();
 
+// Documents: private storage, format-specific text extractors, upload/ownership logic, AI context retrieval.
+builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+builder.Services.AddSingleton<IDocumentExtractor, PdfExtractor>();
+builder.Services.AddSingleton<IDocumentExtractor, DocxExtractor>();
+builder.Services.AddSingleton<IDocumentExtractor, SpreadsheetExtractor>();
+builder.Services.AddScoped<IFileService, FileService>();
+builder.Services.AddScoped<IDocumentContextBuilder, DocumentContextBuilder>();
+builder.Services.AddScoped<UploadSizeLimitFilter>();
+
 // AI provider is chosen by configuration ("Ai:Provider": OpenAI or Groq). Both speak the OpenAI API;
 // a vendor with a different API only needs another IAiChatProvider implementation here.
 builder.Services.AddSingleton<IAiChatProvider>(sp =>
@@ -167,6 +180,10 @@ builder.Services.AddRateLimiter(o =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => PerMinute(limits.AiChatPerMinute)));
+    o.AddPolicy(RateLimitPolicies.Uploads, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => PerMinute(limits.UploadsPerMinute)));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => PerMinute(limits.GlobalPerMinute)));

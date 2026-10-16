@@ -53,6 +53,44 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.ToTable("Conversations", (string)null);
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.DocumentChunk", b =>
+                {
+                    b.Property<long>("ChunkId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("ChunkId"));
+
+                    b.Property<int>("ChunkIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("ChunkId");
+
+                    b.HasIndex("FileId", "ChunkIndex")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DocumentChunks_FileId_ChunkIndex");
+
+                    b.ToTable("DocumentChunks", (string)null);
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.Message", b =>
                 {
                     b.Property<long>("MessageId")
@@ -91,6 +129,32 @@ namespace ChatGPTClone.Api.Data.Migrations
 
                             t.HasCheckConstraint("CK_Messages_TokenUsage", "[TokenUsage] IS NULL OR [TokenUsage] >= 0");
                         });
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.MessageAttachment", b =>
+                {
+                    b.Property<long>("MessageAttachmentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("MessageAttachmentId"));
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("MessageId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("MessageAttachmentId");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("IX_MessageAttachments_FileId");
+
+                    b.HasIndex("MessageId", "FileId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_MessageAttachments_MessageId_FileId");
+
+                    b.ToTable("MessageAttachments", (string)null);
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.OtpVerification", b =>
@@ -177,6 +241,79 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.ToTable("RefreshTokens", (string)null);
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>
+                {
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(150)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("ExtractedCharacters")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FileExtension")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<int?>("PageCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<string>("StatusMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("FileId");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_UploadedFiles_StorageKey");
+
+                    b.HasIndex("UserId", "CreatedAt")
+                        .HasDatabaseName("IX_UploadedFiles_UserId_CreatedAt");
+
+                    b.ToTable("UploadedFiles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_UploadedFiles_FileSize", "[FileSize] >= 0");
+
+                            t.HasCheckConstraint("CK_UploadedFiles_Status", "[ProcessingStatus] IN ('uploaded', 'processing', 'completed', 'failed')");
+                        });
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.User", b =>
                 {
                     b.Property<int>("UserId")
@@ -239,6 +376,17 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.DocumentChunk", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.UploadedFile", "File")
+                        .WithMany("Chunks")
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("File");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.Message", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.Conversation", "Conversation")
@@ -248,6 +396,25 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Conversation");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.MessageAttachment", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.UploadedFile", "File")
+                        .WithMany()
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ChatGPTClone.Api.Models.Message", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("File");
+
+                    b.Navigation("Message");
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.RefreshToken", b =>
@@ -261,9 +428,30 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.Conversation", b =>
                 {
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.Message", b =>
+                {
+                    b.Navigation("Attachments");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>
+                {
+                    b.Navigation("Chunks");
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.User", b =>
