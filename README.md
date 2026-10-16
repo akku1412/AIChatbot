@@ -98,7 +98,7 @@ cd AIChatFrontend;    npm start                             # http://localhost:4
 ### 6. Tests
 
 ```powershell
-dotnet test ChatGPTClone.Api.Tests      # 104 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
+dotnet test ChatGPTClone.Api.Tests      # 125 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
 cd AIChatFrontend; npx ng test --watch=false
 ```
 
@@ -119,6 +119,7 @@ limiting, ownership checks) is real. Set `CHATGPTCLONE_TEST_DB` to use another S
 | PUT | `/api/users/me` | JWT | `{ "fullName" }` |
 | GET/POST | `/api/conversations` | JWT | list (`?page&pageSize`) / create |
 | GET/PUT/DELETE | `/api/conversations/{id}` | JWT | get / rename `{ "title" }` / delete |
+| GET | `/api/conversations/{id}/export` | JWT | the whole conversation as a UTF-8 `.txt` download (owner only) |
 | GET/POST | `/api/chat/{id}/messages` | JWT | list (`?limit&before`) / send `{ "content", "attachmentIds" }` |
 | POST | `/api/files/upload` | JWT | `multipart/form-data`, field `file` → extracted, returns the file record |
 | GET | `/api/files/limits` | JWT | max size, max files per message, allowed extensions |
@@ -174,9 +175,16 @@ POST /api/files/upload
 Authorization: Bearer eyJ...
 Content-Type: multipart/form-data; boundary=...   (Postman sets this)
 ```
-→ `200 { "fileId": "3f2b...", "fileName": "policy.pdf", "fileExtension": ".pdf", "fileSize": 1491, "status": "completed", "pageCount": 2, ... }`
-→ `400` unsupported type / content doesn't match the extension / password-protected / scanned PDF with no text ·
-`413` larger than 20 MB · `429` more than 20 uploads a minute
+→ `201 { "fileId": "3f2b...", "fileName": "policy.pdf", "fileExtension": ".pdf", "fileSize": 1491, "status": "completed", "pageCount": 2, ... }`
+→ `415` unsupported type, or content that doesn't match the extension (e.g. an .exe renamed to .txt) ·
+`422` password-protected, scanned PDF with no text, or empty · `413` larger than 20 MB · `429` more than 20 uploads a minute
+
+```http
+GET /api/conversations/12/export
+Authorization: Bearer eyJ...
+```
+→ `200 text/plain; charset=utf-8` with `Content-Disposition: attachment; filename*=UTF-8''AIChat - <title> - 2026-10-16.txt`
+(every message, oldest first) · `404` if the conversation isn't yours
 
 ```http
 POST /api/chat/12/messages
@@ -191,7 +199,9 @@ Content-Type: application/json
 
 - Formats: **PDF** (text-based; scanned/image-only PDFs are rejected because OCR is not implemented), **Word .docx**,
   **Excel .xlsx / .xls** (all sheets). Old `.doc` is not supported. `.xls` uses ExcelDataReader's binary reader; it is
-  covered by the code path but has not been tested with a real `.xls` file yet.
+  covered by the code path but has not been tested with a real `.xls` file yet. **Text .txt**: UTF-8 (with or without
+  BOM), UTF-16 with BOM, and older ANSI (Windows-1252) files; line breaks are kept and answers cite "Lines 41-80".
+  Binary content renamed to `.txt` (NUL bytes, ZIP/Office/PDF signatures) is rejected.
 - Limits (`FileUploads` in `appsettings.json`, enforced on the server and mirrored in the UI via `/api/files/limits`):
   `MaxFileSizeBytes` 20 MB, `MaxFilesPerMessage` 5, `MaxExtractedCharacters`, `MaxRowsPerSheet`, `ChunkCharacters`,
   `MaxDocumentContextCharacters`, `StoragePath` (default `App_Data/uploads`, outside `wwwroot`).
@@ -203,6 +213,10 @@ Content-Type: application/json
 - Safety: document text is wrapped as untrusted data; the system prompt tells the model never to follow instructions
   found inside documents. File paths are never returned by the API; every file query is filtered by the owner.
 - Tables: `UploadedFiles`, `DocumentChunks`, `MessageAttachments`.
+- Downloads: **Download TXT** under each AI reply saves that reply (built in the browser, named
+  `AIChat reply - <title> - <date time>.txt`). **Export chat as TXT** (header button or the conversation's ⋯ menu) downloads
+  the full conversation from `/api/conversations/{id}/export`, so it includes messages not yet loaded on screen. Both are
+  UTF-8 with BOM and CRLF line breaks so they open correctly in Notepad; times in the export are UTC.
 - Libraries: UglyToad.PdfPig (Apache-2.0), DocumentFormat.OpenXml (MIT), ExcelDataReader (MIT); ClosedXML (MIT) in tests only.
 - Before production: move storage to a private blob container, add malware scanning of uploads, and schedule clean-up
   of uploads that were never attached to a message.
@@ -219,8 +233,9 @@ Content-Type: application/json
 - [ ] Reload `/chat` → still signed in; **Log out** → `/chat` redirects to login.
 - [ ] Chat: send a message → AI reply (Markdown, code copy); rename and delete a conversation (with confirmation).
 - [ ] Another user cannot open your conversation URL (404).
-- [ ] Files: paperclip or drag & drop a PDF, DOCX and XLSX → chips show progress then size; a `.txt` or a >20 MB file is
+- [ ] Files: paperclip or drag & drop a PDF, DOCX, XLSX and TXT → chips show progress then size; a `.rtf` or a >20 MB file is
       refused with a message; removing a chip cancels/deletes it; ask a question → answer cites the file; reload → chips stay on the message.
+- [ ] Downloads: **Download TXT** on a reply and **Export chat as TXT** save a file without leaving the page; open it in Notepad → line breaks and non-English text look right.
 - [ ] Mobile width: login, code page, chat drawer and profile are usable.
 
 ## Production configuration

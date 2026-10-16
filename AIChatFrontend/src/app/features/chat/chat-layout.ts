@@ -1,12 +1,14 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
-import { filter, map } from 'rxjs';
+import { filter, finalize, map } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http/api-error';
 import { ConversationSummary } from '../../core/models/chat.models';
+import { ChatApiService } from '../../core/services/chat-api.service';
 import { ChatStore } from '../../core/services/chat.store';
+import { fileNameFromDisposition, safeFileName, saveBlob } from '../../core/services/download';
 import { AppHeader } from '../../shared/components/app-header/app-header';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
 import { RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
@@ -34,6 +36,7 @@ import { NotificationService } from '../../shared/components/toast/notification.
           (retry)="store.loadConversations()"
           (rename)="rename($event)"
           (remove)="remove($event)"
+          (exportChat)="exportChat($event.conversationId)"
           (logout)="logout()"
         />
       </aside>
@@ -43,7 +46,14 @@ import { NotificationService } from '../../shared/components/toast/notification.
       }
 
       <section class="main">
-        <app-header [title]="title()" (menu)="drawerOpen.set(true)" (newChat)="newChat()" />
+        <app-header
+          [title]="title()"
+          [canExport]="canExport()"
+          [exporting]="exporting()"
+          (menu)="drawerOpen.set(true)"
+          (newChat)="newChat()"
+          (export)="exportChat(store.activeConversationId()!)"
+        />
         <router-outlet />
       </section>
     </div>
@@ -56,6 +66,7 @@ export class ChatLayout {
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
   private readonly confirmDialog = inject(ConfirmDialogService);
+  private readonly chatApi = inject(ChatApiService);
 
   protected readonly drawerOpen = signal(false);
 
@@ -71,8 +82,38 @@ export class ChatLayout {
     this.url().startsWith('/profile') ? 'Profile' : (this.store.activeConversation()?.title ?? 'New chat'),
   );
 
+  /** Export needs a saved conversation with at least one message, and not while a reply is still arriving. */
+  protected readonly canExport = computed(
+    () =>
+      !this.url().startsWith('/profile') &&
+      this.store.activeConversationId() !== null &&
+      this.store.messages().some((m) => m.messageId > 0) &&
+      !this.store.sending(),
+  );
+  protected readonly exporting = signal(false);
+
   constructor() {
     this.store.loadConversations();
+  }
+
+  /** Downloads the whole conversation (all messages, not just the loaded page) as a .txt file from the API. */
+  protected exportChat(conversationId: number): void {
+    if (this.exporting()) {
+      return;
+    }
+    this.exporting.set(true);
+    this.chatApi
+      .exportConversation(conversationId)
+      .pipe(finalize(() => this.exporting.set(false)))
+      .subscribe({
+        next: (response) => {
+          const title = this.store.conversations().find((c) => c.conversationId === conversationId)?.title ?? 'Chat';
+          const fallback = `AIChat - ${safeFileName(title)}.txt`;
+          saveBlob(response.body!, fileNameFromDisposition(response.headers.get('Content-Disposition'), fallback));
+          this.notifications.success('Chat exported as TXT.');
+        },
+        error: (err: unknown) => this.notifications.error(`Couldn't export the chat: ${errorMessage(err)}`),
+      });
   }
 
   protected newChat(): void {

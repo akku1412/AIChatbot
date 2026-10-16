@@ -119,12 +119,14 @@ builder.Services.AddScoped<IConversationRepository, ConversationRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IConversationExportService, ConversationExportService>();
 
 // Documents: private storage, format-specific text extractors, upload/ownership logic, AI context retrieval.
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 builder.Services.AddSingleton<IDocumentExtractor, PdfExtractor>();
 builder.Services.AddSingleton<IDocumentExtractor, DocxExtractor>();
 builder.Services.AddSingleton<IDocumentExtractor, SpreadsheetExtractor>();
+builder.Services.AddSingleton<IDocumentExtractor, TextFileExtractor>();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IDocumentContextBuilder, DocumentContextBuilder>();
 builder.Services.AddScoped<UploadSizeLimitFilter>();

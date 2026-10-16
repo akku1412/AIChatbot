@@ -47,7 +47,7 @@
           </button>
         }
         @for (message of store.messages(); track message.messageId) {
-          <app-chat-message [message]="message" />
+          <app-chat-message [message]="message" [conversationTitle]="store.activeConversation()?.title ?? ''" />
         }
         @if (store.sending()) {
           <app-typing-indicator [label]="store.sendingWithFiles() ? 'Reading your documents…' : ''" />

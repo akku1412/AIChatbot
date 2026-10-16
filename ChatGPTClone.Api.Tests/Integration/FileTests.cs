@@ -56,7 +56,8 @@ public class FileTests(ApiFactory factory)
     }
 
     [Theory]
-    [InlineData("notes.txt", "unsupported", 415)]
+    [InlineData("notes.txt", "invalid_format", 415)] // an .exe renamed to .txt
+    [InlineData("notes.rtf", "unsupported", 415)]
     [InlineData("macro.docm", "unsupported", 415)]
     [InlineData("virus.pdf", "invalid_format", 415)]
     [InlineData("broken.xlsx", "invalid_format", 415)]

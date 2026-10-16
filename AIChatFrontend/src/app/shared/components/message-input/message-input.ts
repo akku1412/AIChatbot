@@ -207,7 +207,7 @@ export class MessageInput {
     for (const file of files) {
       const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
       if (!allowedExtensions.includes(extension)) {
-        this.notifications.error(`"${file.name}" isn't supported. Attach PDF, Word (.docx) or Excel (.xlsx, .xls) files.`);
+        this.notifications.error(`"${file.name}" isn't supported. Attach PDF, Word (.docx), Excel (.xlsx, .xls) or text (.txt) files.`);
         continue;
       }
       if (file.size === 0) {

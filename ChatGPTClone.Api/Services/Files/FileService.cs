@@ -55,7 +55,7 @@ public sealed class FileService(
         if (!FileSignature.Supported.TryGetValue(extension, out var format))
         {
             throw Problem(415, "Unsupported file type",
-                "Only PDF (.pdf), Word (.docx) and Excel (.xlsx, .xls) files are supported.", "unsupported");
+                "Only PDF (.pdf), Word (.docx), Excel (.xlsx, .xls) and text (.txt) files are supported.", "unsupported");
         }
 
         // ---- Store under a random name, then verify the real format from the bytes ----

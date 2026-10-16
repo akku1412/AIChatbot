@@ -81,6 +81,10 @@ const TITLE_MAX = 200;
                       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
                       Rename
                     </button>
+                    <button type="button" role="menuitem" (click)="requestExport(conversation)">
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      Export as TXT
+                    </button>
                     <button type="button" role="menuitem" class="danger" (click)="requestDelete(conversation)">
                       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       Delete
@@ -144,6 +148,7 @@ export class Sidebar {
   readonly closed = output<void>();
   readonly rename = output<RenameRequest>();
   readonly remove = output<ConversationSummary>();
+  readonly exportChat = output<ConversationSummary>();
 
   protected readonly titleMax = TITLE_MAX;
   protected readonly imageFailed = signal(false);
@@ -217,6 +222,11 @@ export class Sidebar {
     event.preventDefault();
     event.stopPropagation();
     this.editingId.set(null);
+  }
+
+  protected requestExport(conversation: ConversationSummary): void {
+    this.closeMenu();
+    this.exportChat.emit(conversation);
   }
 
   protected requestDelete(conversation: ConversationSummary): void {

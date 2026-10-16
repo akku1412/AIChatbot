@@ -11,7 +11,8 @@ namespace ChatGPTClone.Api.Controllers;
 [Route("api/conversations")]
 [Authorize]
 [Produces("application/json")]
-public sealed class ConversationsController(IConversationService conversations) : ControllerBase
+public sealed class ConversationsController(IConversationService conversations, IConversationExportService exports)
+    : ControllerBase
 {
     /// <summary>Most recently active first, paginated.</summary>
     [HttpGet]
@@ -43,6 +44,18 @@ public sealed class ConversationsController(IConversationService conversations) 
     public async Task<ActionResult<ConversationDto>> Rename(int id, RenameConversationRequest request,
         CancellationToken cancellationToken) =>
         Ok(await conversations.RenameAsync(User.GetUserId(), id, request.Title, cancellationToken));
+
+    /// <summary>The whole conversation (every message, oldest first) as a UTF-8 .txt download.</summary>
+    [HttpGet("{id:int}/export")]
+    [Produces("text/plain", "application/json")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK, "text/plain")]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Export(int id, CancellationToken cancellationToken)
+    {
+        var file = await exports.ExportAsTextAsync(User.GetUserId(), id, cancellationToken);
+        // File() sets "Content-Disposition: attachment" with an RFC 5987 filename*, so non-English titles survive.
+        return File(file.Content, file.ContentType, file.FileName);
+    }
 
     /// <summary>Deletes the conversation and all of its messages.</summary>
     [HttpDelete("{id:int}")]

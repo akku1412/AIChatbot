@@ -58,6 +58,7 @@ export function formatFileSize(bytes: number): string {
     .badge.pdf { background: #dc2626; }
     .badge.word { background: #2563eb; }
     .badge.excel { background: #16a34a; }
+    .badge.txt { background: #64748b; }
     .badge.other { background: var(--text-muted); }
     .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
     .name { font-size: 0.8125rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -99,6 +100,8 @@ export class AttachmentChip {
       case '.xlsx':
       case '.xls':
         return 'excel';
+      case '.txt':
+        return 'txt';
       default:
         return 'other';
     }
@@ -112,6 +115,8 @@ export class AttachmentChip {
         return 'DOC';
       case 'excel':
         return 'XLS';
+      case 'txt':
+        return 'TXT';
       default:
         return 'FILE';
     }

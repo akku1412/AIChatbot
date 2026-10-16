@@ -61,7 +61,7 @@ export interface UploadLimits {
 export const DEFAULT_UPLOAD_LIMITS: UploadLimits = {
   maxFileSizeBytes: 20 * 1024 * 1024,
   maxFilesPerMessage: 5,
-  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls'],
+  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls', '.txt'],
 };
 
 export interface MessagePage {

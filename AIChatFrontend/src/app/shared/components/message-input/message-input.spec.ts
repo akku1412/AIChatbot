@@ -76,9 +76,15 @@ describe('MessageInput', () => {
   });
 
   it('rejects unsupported files without uploading them', () => {
-    pick(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+    pick(new File(['x'], 'notes.rtf', { type: 'application/rtf' }));
     http.expectNone((req) => req.url.endsWith('/files/upload'));
     expect(fixture.nativeElement.querySelector('app-attachment-chip')).toBeNull();
+  });
+
+  it('accepts .txt files', () => {
+    pick(new File(['meeting notes'], 'notes.txt', { type: 'text/plain' }));
+    http.expectOne((req) => req.url.endsWith('/files/upload'));
+    expect(fixture.nativeElement.querySelector('app-attachment-chip .badge')?.textContent).toBe('TXT');
   });
 
   it('uploads a file, blocks sending until it is ready, then sends its id', () => {

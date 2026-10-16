@@ -13,6 +13,7 @@ public static class FileSignature
             [".docx"] = ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word document"),
             [".xlsx"] = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Excel workbook"),
             [".xls"] = ("application/vnd.ms-excel", "Excel 97-2003 workbook"),
+            [".txt"] = ("text/plain", "Text file"),
         };
 
     private static readonly byte[] ZipMagic = [0x50, 0x4B, 0x03, 0x04];
@@ -44,9 +45,31 @@ public static class FileSignature
                     ? null
                     : "This file is not a valid Excel 97-2003 (.xls) workbook.";
 
+            case ".txt":
+                return LooksLikeText(header, read) ? null : "This file is not a plain text file.";
+
             default:
                 return "Unsupported file type.";
         }
+    }
+
+    /// <summary>
+    /// Text has no magic bytes, so reject what is clearly binary: known document signatures (a .zip/.docx, .xls or
+    /// .pdf renamed to .txt) and NUL bytes, which never appear in UTF-8 or ANSI text but always appear early in
+    /// executables and images. UTF-16 is allowed only with its BOM.
+    /// </summary>
+    private static bool LooksLikeText(byte[] header, int read)
+    {
+        var span = header.AsSpan(0, read);
+        if (span.StartsWith((byte[])[0xFF, 0xFE]) || span.StartsWith((byte[])[0xFE, 0xFF]))
+        {
+            return true; // UTF-16 with BOM: NUL bytes are expected
+        }
+        if (span.StartsWith(ZipMagic) || span.StartsWith(OleMagic) || span.StartsWith("%PDF"u8))
+        {
+            return false;
+        }
+        return !span.Contains((byte)0);
     }
 
     private static string? ValidateOpenXml(Stream content, byte[] header, int read, string requiredPart, string macroPart, string kind)

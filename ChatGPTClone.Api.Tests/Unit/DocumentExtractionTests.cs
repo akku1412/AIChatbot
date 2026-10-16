@@ -159,6 +159,98 @@ public class DocumentExtractionTests
         Assert.Equal(text.Replace("\n", "").Replace(" ", ""), string.Concat(chunks.Select(c => c.Content)).Replace("\n", "").Replace(" ", ""));
     }
 
+    // ---------- TXT ----------
+
+    [Fact]
+    public void Utf8_text_keeps_line_breaks_and_unicode_with_line_locations()
+    {
+        var lines = Enumerable.Range(1, 45).Select(i => $"Line {i}").ToList();
+        lines[0] = "नमस्ते — café ✓";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines));
+
+        var result = Run(new TextFileExtractor(), bytes, ".txt");
+
+        Assert.Equal(["Lines 1-40", "Lines 41-45"], result.Sections.Select(s => s.Location));
+        Assert.StartsWith("नमस्ते — café ✓\nLine 2\nLine 3", result.Sections[0].Text);
+        Assert.DoesNotContain("\r", result.Sections[0].Text);
+        Assert.Null(result.PageCount);
+        Assert.Null(result.Warning);
+    }
+
+    [Fact]
+    public void Trailing_line_breaks_do_not_count_as_lines()
+    {
+        var result = Run(new TextFileExtractor(), "one\r\ntwo\r\nthree\r\n\r\n"u8.ToArray(), ".txt");
+        Assert.Equal("Lines 1-3", Assert.Single(result.Sections).Location);
+    }
+
+    [Theory]
+    [InlineData("utf8-bom")]
+    [InlineData("utf16-le")]
+    [InlineData("utf16-be")]
+    [InlineData("windows-1252")]
+    public void Text_encodings_are_detected(string encoding)
+    {
+        const string text = "Café menu\nCrème brûlée: 250";
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        byte[] bytes = encoding switch
+        {
+            "utf8-bom" => [.. System.Text.Encoding.UTF8.GetPreamble(), .. System.Text.Encoding.UTF8.GetBytes(text)],
+            "utf16-le" => [.. System.Text.Encoding.Unicode.GetPreamble(), .. System.Text.Encoding.Unicode.GetBytes(text)],
+            "utf16-be" => [.. System.Text.Encoding.BigEndianUnicode.GetPreamble(), .. System.Text.Encoding.BigEndianUnicode.GetBytes(text)],
+            _ => System.Text.Encoding.GetEncoding(1252).GetBytes(text),
+        };
+
+        var result = Run(new TextFileExtractor(), bytes, ".txt");
+
+        Assert.Equal(text, Assert.Single(result.Sections).Text);
+    }
+
+    [Fact]
+    public void Blank_text_file_is_reported_as_empty()
+    {
+        var ex = Assert.Throws<DocumentExtractionException>(() => Run(new TextFileExtractor(), "  \r\n\t\n "u8.ToArray(), ".txt"));
+        Assert.Equal("empty", ex.Reason);
+    }
+
+    [Fact]
+    public void Long_text_stops_at_the_character_budget_with_a_warning()
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join("\n", Enumerable.Repeat(new string('a', 100), 50)));
+
+        var result = new TextFileExtractor().Extract(new MemoryStream(bytes), ".txt", new ExtractionLimits(1000, 50_000));
+
+        Assert.Equal(1000, result.Sections.Sum(s => s.Text.Length));
+        Assert.Contains("first 1,000 characters", result.Warning);
+    }
+
+    [Theory]
+    [InlineData("plain", true)]
+    [InlineData("utf16-bom", true)]
+    [InlineData("nul-bytes", false)]
+    [InlineData("zip", false)]
+    [InlineData("pdf", false)]
+    public void Txt_signature_rejects_binary_content(string kind, bool accepted)
+    {
+        byte[] bytes = kind switch
+        {
+            "plain" => "Meeting notes\nMZ starts this line but it is still text"u8.ToArray(),
+            "utf16-bom" => [0xFF, 0xFE, (byte)'h', 0, (byte)'i', 0],
+            "nul-bytes" => TestDocuments.FakeExe(),
+            "zip" => TestDocuments.CorruptZip(),
+            _ => TestDocuments.Pdf(["hello"]),
+        };
+
+        Assert.Equal(accepted, FileSignature.Validate(new MemoryStream(bytes), ".txt") is null);
+    }
+
+    [Theory]
+    [InlineData("Trip / Plan: Goa?", "Trip Plan Goa")]
+    [InlineData("  <>|  ", "Chat")]
+    [InlineData("हिंदी चैट", "हिंदी चैट")]
+    public void Export_file_names_are_safe(string title, string expected) =>
+        Assert.Equal(expected, Services.ConversationExportService.SafeFileName(title));
+
     [Fact]
     public void Retrieval_terms_drop_stop_words()
     {

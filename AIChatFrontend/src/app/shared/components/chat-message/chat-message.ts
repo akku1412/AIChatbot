@@ -1,6 +1,7 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
 
 import { ChatMessage } from '../../../core/models/chat.models';
+import { fileTimestamp, safeFileName, saveTextFile } from '../../../core/services/download';
 import { AppLogo } from '../app-logo/app-logo';
 import { AttachmentChip } from '../attachment-chip/attachment-chip';
 import { MarkdownView } from '../markdown/markdown';
@@ -44,6 +45,10 @@ import { NotificationService } from '../toast/notification.service';
                 <span>Copy</span>
               }
             </button>
+            <button type="button" class="action" (click)="download()" aria-label="Download response as a text file" title="Download as .txt">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>Download TXT</span>
+            </button>
           </div>
         }
       </div>
@@ -74,8 +79,17 @@ export class ChatMessageView {
   private readonly notifications = inject(NotificationService);
 
   readonly message = input.required<ChatMessage>();
+  /** Used to name downloaded replies. */
+  readonly conversationTitle = input('');
   protected readonly isUser = computed(() => this.message().role === 'user');
   protected readonly copied = signal(false);
+
+  /** Saves this reply as a .txt file (Markdown is plain, readable text, so it is kept as written). */
+  protected download(): void {
+    const message = this.message();
+    const title = safeFileName(this.conversationTitle(), 'Chat');
+    saveTextFile(message.content, `AIChat reply - ${title} - ${fileTimestamp(new Date(message.createdAt))}.txt`);
+  }
 
   protected async copy(): Promise<void> {
     try {

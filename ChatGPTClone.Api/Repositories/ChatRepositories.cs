@@ -78,6 +78,14 @@ public sealed class MessageRepository(AppDbContext db) : IMessageRepository
         return rows.Distinct().Take(take).ToList();
     }
 
+    public Task<List<Message>> GetAllAsync(int conversationId, CancellationToken cancellationToken) =>
+        db.Messages.AsNoTracking()
+            .Include(m => m.Attachments).ThenInclude(a => a.File)
+            .Where(m => m.ConversationId == conversationId)
+            .OrderBy(m => m.MessageId)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
     public Task<bool> AnyAsync(int conversationId, CancellationToken cancellationToken) =>
         db.Messages.AnyAsync(m => m.ConversationId == conversationId, cancellationToken);
 

@@ -1,6 +1,6 @@
 import { Component, input, output } from '@angular/core';
 
-/** Top bar of the chat area. The menu and new-chat buttons only show on small screens. */
+/** Top bar of the chat area. The menu and new-chat buttons only show on small screens; export shows for an open chat. */
 @Component({
   selector: 'app-header',
   template: `
@@ -9,6 +9,12 @@ import { Component, input, output } from '@angular/core';
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
       <h1 class="title" [title]="title()">{{ title() }}</h1>
+      @if (canExport()) {
+        <button type="button" class="icon-button export" [disabled]="exporting()" aria-label="Export chat as TXT"
+                title="Export chat as TXT" (click)="export.emit()">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      }
       <button type="button" class="icon-button mobile" aria-label="New chat" (click)="newChat.emit()">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
@@ -28,12 +34,21 @@ import { Component, input, output } from '@angular/core';
       background: transparent; color: var(--text); cursor: pointer;
     }
     .icon-button:hover { background: var(--surface-hover); }
+    .icon-button:disabled { opacity: 0.5; cursor: progress; }
+    .export { color: var(--text-muted); }
+    .export:hover { color: var(--text); }
     .mobile { visibility: hidden; }
     @media (max-width: 768px) { .mobile { visibility: visible; } }
+    /* Desktop: the hidden new-chat button would leave a gap after the export button. */
+    @media (min-width: 769px) { .export + .mobile { display: none; } }
   `,
 })
 export class AppHeader {
   readonly title = input('AIChat');
+  /** Shows the "Export chat as TXT" button (only when a saved conversation is open). */
+  readonly canExport = input(false);
+  readonly exporting = input(false);
   readonly menu = output<void>();
   readonly newChat = output<void>();
+  readonly export = output<void>();
 }

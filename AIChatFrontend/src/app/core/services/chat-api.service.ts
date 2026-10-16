@@ -1,4 +1,4 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
@@ -36,6 +36,11 @@ export class ChatApiService {
 
   deleteConversation(conversationId: number): Observable<void> {
     return this.http.delete<void>(`${this.conversationsUrl}/${conversationId}`);
+  }
+
+  /** The whole conversation as a .txt file (the server names it in Content-Disposition). */
+  exportConversation(conversationId: number): Observable<HttpResponse<Blob>> {
+    return this.http.get(`${this.conversationsUrl}/${conversationId}/export`, { observe: 'response', responseType: 'blob' });
   }
 
   /** Newest page of messages; pass beforeMessageId to load older ones. Items are oldest-first. */

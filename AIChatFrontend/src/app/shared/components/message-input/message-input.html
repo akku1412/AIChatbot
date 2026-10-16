@@ -21,8 +21,8 @@
       type="button"
       class="attach"
       [disabled]="disabled()"
-      aria-label="Attach files (PDF, Word, Excel)"
-      title="Attach PDF, Word or Excel files"
+      aria-label="Attach files (PDF, Word, Excel, text)"
+      title="Attach PDF, Word, Excel or text files"
       (click)="openPicker()"
     >
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -57,7 +57,7 @@
   @if (dragging()) {
     <div class="drop-overlay" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 16V4M6 10l6-6 6 6M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-      Drop PDF, Word or Excel files to attach
+      Drop PDF, Word, Excel or text files to attach
     </div>
   }
 </form>
@@ -71,6 +71,6 @@
     @if (remaining() < 500) {
       <span [class.over]="remaining() <= 0">{{ remaining() }} characters left · </span>
     }
-    <span class="keys">Enter to send · Shift + Enter for a new line · Attach PDF, Word, Excel (max {{ limits().maxFilesPerMessage }})</span>
+    <span class="keys">Enter to send · Shift + Enter for a new line · Attach PDF, Word, Excel, TXT (max {{ limits().maxFilesPerMessage }})</span>
   }
 </p>
