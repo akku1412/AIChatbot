@@ -10,4 +10,7 @@ public static class RateLimitPolicies
 
     /// <summary>Per-user limit on file uploads (each one is stored and parsed).</summary>
     public const string Uploads = "uploads";
+
+    /// <summary>Per-user limit on generating PDF/DOCX/XLSX/TXT exports (CPU work on the server).</summary>
+    public const string Exports = "exports";
 }

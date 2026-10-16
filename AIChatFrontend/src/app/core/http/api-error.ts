@@ -1,4 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
+import { MonoTypeOperatorFunction, catchError, from, switchMap, throwError } from 'rxjs';
 
 import { ApiProblem } from '../auth/auth.models';
 
@@ -35,6 +36,44 @@ export function errorMessage(error: unknown): string {
   const problem = toApiProblem(error);
   const firstValidationError = problem.errors ? Object.values(problem.errors).flat()[0] : undefined;
   return firstValidationError ?? problem.detail ?? problem.title ?? 'Something went wrong. Please try again.';
+}
+
+/**
+ * File downloads use responseType 'blob', so a failure's ProblemDetails arrives as a Blob too.
+ * This operator parses it back into JSON, so errorMessage() shows the server's explanation.
+ */
+export function readBlobErrors<T>(): MonoTypeOperatorFunction<T> {
+  return catchError((error: unknown) => from(withJsonErrorBody(error)).pipe(switchMap((e) => throwError(() => e))));
+}
+
+async function withJsonErrorBody(error: unknown): Promise<unknown> {
+  if (!(error instanceof HttpErrorResponse) || !(error.error instanceof Blob)) {
+    return error;
+  }
+  try {
+    const body: unknown = JSON.parse(await blobText(error.error));
+    return new HttpErrorResponse({
+      error: body,
+      status: error.status,
+      statusText: error.statusText,
+      headers: error.headers,
+      url: error.url ?? undefined,
+    });
+  } catch {
+    return error; // not JSON (e.g. a proxy's HTML error page): keep the generic message
+  }
+}
+
+function blobText(blob: Blob): Promise<string> {
+  if (typeof blob.text === 'function') {
+    return blob.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
 }
 
 /** Allows only same-app relative paths, so ?returnUrl= cannot redirect to another site. */

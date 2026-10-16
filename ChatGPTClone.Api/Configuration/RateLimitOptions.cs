@@ -22,4 +22,8 @@ public sealed class RateLimitOptions
     /// <summary>File uploads, per signed-in user.</summary>
     [Range(1, 100_000)]
     public int UploadsPerMinute { get; init; } = 20;
+
+    /// <summary>Reply exports (PDF, DOCX, XLSX, TXT), per signed-in user.</summary>
+    [Range(1, 100_000)]
+    public int ExportsPerMinute { get; init; } = 30;
 }

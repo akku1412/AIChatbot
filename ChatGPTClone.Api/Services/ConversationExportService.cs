@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Models;
+using ChatGPTClone.Api.Services.Export;
 
 namespace ChatGPTClone.Api.Services;
 
@@ -50,7 +51,11 @@ public sealed partial class ConversationExportService(
             }
             if (message.Content.Length > 0)
             {
-                text.Append(NormalizeLineBreaks(message.Content).TrimEnd()).Append("\r\n");
+                // AI replies are Markdown: write them as clean plain text (no ** or #). User text is kept as typed.
+                var body = message.Role == MessageRole.Assistant
+                    ? PlainTextRenderer.Render(MarkdownReader.Parse(message.Content))
+                    : NormalizeLineBreaks(message.Content);
+                text.Append(body.TrimEnd()).Append("\r\n");
             }
             text.Append("\r\n").Append(Rule).Append("\r\n");
         }

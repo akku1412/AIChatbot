@@ -19,11 +19,17 @@ public interface IFileService
 
     Task DeleteAsync(int userId, Guid fileId, CancellationToken cancellationToken);
 
+    /// <summary>The original bytes of the user's file, with its original name and verified content type. 404 otherwise.</summary>
+    Task<FileDownload> OpenDownloadAsync(int userId, Guid fileId, CancellationToken cancellationToken);
+
     /// <summary>The user's files with these ids, all Completed; throws 404/409 otherwise.</summary>
     Task<List<UploadedFile>> GetReadyFilesAsync(int userId, IReadOnlyCollection<Guid> fileIds, CancellationToken cancellationToken);
 
     UploadLimitsDto Limits { get; }
 }
+
+/// <summary>An open stream (the caller disposes it) plus what the browser needs to save it.</summary>
+public sealed record FileDownload(Stream Content, string ContentType, string FileName, long Length);
 
 public sealed class FileService(
     AppDbContext db,
@@ -218,6 +224,26 @@ public sealed class FileService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Cleanup after failed upload {FileId} was incomplete", record.FileId);
+        }
+    }
+
+    public async Task<FileDownload> OpenDownloadAsync(int userId, Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await GetOwnedAsync(userId, fileId, cancellationToken);
+        if (file.ProcessingStatus != FileProcessingStatus.Completed)
+        {
+            throw Problem(409, "File not ready", "This file is still being processed. Try again in a moment.", "not_ready");
+        }
+
+        try
+        {
+            // Name and type come from our own records (sanitized at upload / verified from the bytes), never from the request.
+            return new FileDownload(storage.OpenRead(file.StorageKey), file.ContentType, file.OriginalFileName, file.FileSize);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            logger.LogWarning("Stored content missing for file {FileId}", file.FileId);
+            throw Problem(404, "File not found", "This file is no longer available.", "file_missing");
         }
     }
 

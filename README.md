@@ -98,7 +98,7 @@ cd AIChatFrontend;    npm start                             # http://localhost:4
 ### 6. Tests
 
 ```powershell
-dotnet test ChatGPTClone.Api.Tests      # 125 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
+dotnet test ChatGPTClone.Api.Tests      # 153 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
 cd AIChatFrontend; npx ng test --watch=false
 ```
 
@@ -124,6 +124,8 @@ limiting, ownership checks) is real. Set `CHATGPTCLONE_TEST_DB` to use another S
 | POST | `/api/files/upload` | JWT | `multipart/form-data`, field `file` → extracted, returns the file record |
 | GET | `/api/files/limits` | JWT | max size, max files per message, allowed extensions |
 | GET | `/api/files` · `/api/files/{fileId}` | JWT | your uploads / one upload (owner only, 404 otherwise) |
+| GET | `/api/files/{fileId}/download` | JWT | the original uploaded file (owner only) |
+| GET | `/api/messages/{messageId}/export?format=` | JWT | a reply as a generated `txt` / `pdf` / `docx` / `xlsx` file (owner only) |
 | DELETE | `/api/files/{fileId}` | JWT | deletes your upload (stored file, chunks and message links; the message text stays) |
 
 Errors are RFC 7807 `application/problem+json` with `title`, `detail`, and sometimes `reason`,
@@ -187,6 +189,21 @@ Authorization: Bearer eyJ...
 (every message, oldest first) · `404` if the conversation isn't yours
 
 ```http
+GET /api/files/3f2b.../download
+Authorization: Bearer eyJ...
+```
+→ `200` the original bytes, e.g. `Content-Type: application/pdf`, `Content-Disposition: attachment; filename*=UTF-8''policy.pdf`
+· `404` not yours / doesn't exist · `401` without a token. (In Postman use **Send and Download** to save the file.)
+
+```http
+GET /api/messages/57/export?format=pdf        (txt | pdf | docx | xlsx)
+Authorization: Bearer eyJ...
+```
+→ `200` a generated file named `AIChat reply - <title> - <date>.pdf` · `400` unknown format ·
+`404` not your message · `422` `"reason": "no_tabular_data"` for XLSX when the reply has no table · `429` too many exports.
+The message id is `assistantMessage.messageId` in the response of `POST /api/chat/{id}/messages`.
+
+```http
 POST /api/chat/12/messages
 Authorization: Bearer eyJ...
 Content-Type: application/json
@@ -213,11 +230,34 @@ Content-Type: application/json
 - Safety: document text is wrapped as untrusted data; the system prompt tells the model never to follow instructions
   found inside documents. File paths are never returned by the API; every file query is filtered by the owner.
 - Tables: `UploadedFiles`, `DocumentChunks`, `MessageAttachments`.
-- Downloads: **Download TXT** under each AI reply saves that reply (built in the browser, named
-  `AIChat reply - <title> - <date time>.txt`). **Export chat as TXT** (header button or the conversation's ⋯ menu) downloads
-  the full conversation from `/api/conversations/{id}/export`, so it includes messages not yet loaded on screen. Both are
-  UTF-8 with BOM and CRLF line breaks so they open correctly in Notepad; times in the export are UTC.
-- Libraries: UglyToad.PdfPig (Apache-2.0), DocumentFormat.OpenXml (MIT), ExcelDataReader (MIT); ClosedXML (MIT) in tests only.
+- No new tables or migrations were needed for downloads/exports: originals are read from the existing private storage
+  using the `StorageKey` in `UploadedFiles`, and exports are generated on demand from `Messages.Content` (nothing is stored).
+
+## Downloads and exports
+
+- **Original files**: every attachment on a sent message has a download button → `GET /api/files/{fileId}/download`
+  returns the exact uploaded bytes with the original file name and the verified content type
+  (`text/plain`, `application/pdf`, Word/Excel Open XML types). Owner only (404 for anyone else, 401 when signed out);
+  the id must be a GUID, so paths can never be passed; responses are `Cache-Control: private, no-store`.
+- **AI replies**: the **Download ▾** menu under each reply → `GET /api/messages/{messageId}/export?format=txt|pdf|docx|xlsx`.
+  The reply's Markdown is parsed (Markdig) into headings, paragraphs, bold/italic/code, lists, quotes, code blocks and
+  tables, then rendered for real in each format:
+  - **TXT** – plain text without Markdown symbols; underlined headings, indented lists, aligned table columns; UTF-8 with BOM, CRLF.
+  - **PDF** – A4 document (QuestPDF) with title header, headings, paragraphs, lists, shaded code blocks, bordered tables and page numbers.
+  - **DOCX** – editable Word document (Open XML SDK) using Word's own Heading 1–3 styles, real tables with a repeating header row.
+  - **XLSX** – one worksheet per table (ClosedXML), named after the heading above it; bold, frozen, filterable header row;
+    numbers, percentages, ₹/$ amounts and ISO dates are stored as real Excel values (text that looks like a formula stays text).
+    A reply without a table but with a "Label: value" list becomes an Item/Value sheet; anything else returns `422` with an explanation.
+  - Raw HTML in a reply is written as literal text, never interpreted. Exports are rate limited per user
+    (`RateLimits:ExportsPerMinute`, default 30).
+- **Whole chat**: **Export chat as TXT** (header button or the conversation's ⋯ menu) → `GET /api/conversations/{id}/export`,
+  every message oldest first (AI replies as clean plain text); times are UTC.
+- **Fonts**: PDFs use the bundled Noto Sans, Noto Sans Devanagari (Hindi) and Noto Sans Mono fonts in
+  `ChatGPTClone.Api/Fonts` (SIL Open Font License, `Fonts/OFL.txt`). They are copied to the build and publish output,
+  so PDFs look the same on Windows and Linux servers without installing fonts.
+- **Libraries**: UglyToad.PdfPig (Apache-2.0), DocumentFormat.OpenXml (MIT), ExcelDataReader (MIT), ClosedXML (MIT),
+  Markdig (BSD-2-Clause), QuestPDF (**Community License**: free for individuals, and for companies under USD 1M annual
+  revenue, non-profits and open source; larger companies need a paid QuestPDF license — see questpdf.com/pricing).
 - Before production: move storage to a private blob container, add malware scanning of uploads, and schedule clean-up
   of uploads that were never attached to a message.
 
@@ -235,7 +275,11 @@ Content-Type: application/json
 - [ ] Another user cannot open your conversation URL (404).
 - [ ] Files: paperclip or drag & drop a PDF, DOCX, XLSX and TXT → chips show progress then size; a `.rtf` or a >20 MB file is
       refused with a message; removing a chip cancels/deletes it; ask a question → answer cites the file; reload → chips stay on the message.
-- [ ] Downloads: **Download TXT** on a reply and **Export chat as TXT** save a file without leaving the page; open it in Notepad → line breaks and non-English text look right.
+- [ ] Downloads: the ⤓ button on each sent attachment saves the original file (same name, opens normally).
+- [ ] Reply **Download ▾** → TXT, PDF, DOCX, XLSX each save without leaving the page ("Preparing PDF…" while it works);
+      open them in Notepad, a PDF viewer, Word and Excel. XLSX on a reply without a table shows an explanation instead.
+- [ ] **Export chat as TXT** saves the whole conversation; non-English text and line breaks look right in Notepad.
+- [ ] Signed in as another user, a copied download/export URL returns 404.
 - [ ] Mobile width: login, code page, chat drawer and profile are usable.
 
 ## Production configuration

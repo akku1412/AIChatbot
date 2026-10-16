@@ -63,6 +63,22 @@ public sealed class FilesController(IFileService files) : ControllerBase
     public async Task<ActionResult<UploadedFileDto>> Get(Guid fileId, CancellationToken cancellationToken) =>
         Ok(await files.GetAsync(User.GetUserId(), fileId, cancellationToken));
 
+    /// <summary>
+    /// The original file, byte for byte, as an attachment with its original name and verified content type.
+    /// Owner only: other users' ids return 404 exactly like ids that don't exist.
+    /// </summary>
+    [HttpGet("{fileId:guid}/download")]
+    [Produces("application/octet-stream", "application/json")]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Download(Guid fileId, CancellationToken cancellationToken)
+    {
+        var download = await files.OpenDownloadAsync(User.GetUserId(), fileId, cancellationToken);
+        Response.Headers.CacheControl = "private, no-store";
+        // File() disposes the stream and sets "Content-Disposition: attachment" with an RFC 5987 filename*.
+        return File(download.Content, download.ContentType, download.FileName);
+    }
+
     /// <summary>Deletes the file, its extracted text and its links to chat messages.</summary>
     [HttpDelete("{fileId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

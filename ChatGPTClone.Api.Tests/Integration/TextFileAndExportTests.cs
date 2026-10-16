@@ -89,7 +89,8 @@ public class TextFileAndExportTests(ApiFactory factory)
         Assert.StartsWith("Conversation: Trip / Plan: Goa?\r\n", text);
         Assert.Contains("Messages: 4\r\n", text);
         Assert.Contains("[Attached: notes.txt]\r\nFirst line\r\nSecond line — नमस्ते\r\n", text);
-        Assert.Contains("**Echo:**", text); // the AI reply, Markdown kept as readable text
+        Assert.Contains("Echo: ", text); // the AI reply as plain text
+        Assert.DoesNotContain("**", text);
         Assert.Contains("Follow-up question", text);
         Assert.True(text.IndexOf("First line", StringComparison.Ordinal) < text.IndexOf("Follow-up question", StringComparison.Ordinal));
         Assert.Equal(2, CountOf(text, "\r\nYou ("));

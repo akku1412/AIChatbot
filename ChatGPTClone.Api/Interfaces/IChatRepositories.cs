@@ -24,6 +24,9 @@ public interface IMessageRepository
     /// <summary>The most recent messages for AI context, oldest first.</summary>
     Task<List<Message>> GetRecentAsync(int conversationId, int count, CancellationToken cancellationToken);
 
+    /// <summary>One message with its conversation, only if that conversation belongs to <paramref name="userId"/>.</summary>
+    Task<Message?> GetOwnedAsync(long messageId, int userId, CancellationToken cancellationToken);
+
     /// <summary>Every message with its attachments, oldest first (for exporting the whole conversation).</summary>
     Task<List<Message>> GetAllAsync(int conversationId, CancellationToken cancellationToken);
 

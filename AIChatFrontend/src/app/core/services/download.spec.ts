@@ -1,4 +1,6 @@
-import { fileNameFromDisposition, fileTimestamp, safeFileName, saveTextFile } from './download';
+import { HttpHeaders, HttpResponse } from '@angular/common/http';
+
+import { fileNameFromDisposition, safeFileName, saveResponse } from './download';
 
 describe('download helpers', () => {
   it('makes titles safe for file names', () => {
@@ -19,14 +21,11 @@ describe('download helpers', () => {
     expect(fileNameFromDisposition(null, 'fallback.txt')).toBe('fallback.txt');
   });
 
-  it('formats a local timestamp for file names', () => {
-    expect(fileTimestamp(new Date(2026, 9, 6, 9, 5))).toBe('2026-10-06 0905');
-  });
-
-  it('downloads text through a temporary link with CRLF line breaks and a BOM', async () => {
+  it('saves an API file response through a temporary link, under the server-chosen name', () => {
+    const blob = new Blob(['%PDF-1.7'], { type: 'application/pdf' });
     let saved: Blob | undefined;
-    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
-      saved = blob as Blob;
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+      saved = b as Blob;
       return 'blob:test';
     });
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -35,15 +34,18 @@ describe('download helpers', () => {
       clicked = this;
     });
 
-    saveTextFile('line one\nline two', 'reply.txt');
+    saveResponse(
+      new HttpResponse({
+        body: blob,
+        headers: new HttpHeaders({ 'Content-Disposition': `attachment; filename*=UTF-8''AIChat%20reply.pdf` }),
+      }),
+      'fallback.pdf',
+    );
 
-    expect(clicked?.download).toBe('reply.txt');
+    expect(clicked?.download).toBe('AIChat reply.pdf');
     expect(clicked?.href).toBe('blob:test');
-    expect(document.querySelector('a[download]')).toBeNull(); // link removed again
-    const bytes = new Uint8Array(await saved!.arrayBuffer());
-    expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
-    expect(new TextDecoder().decode(bytes.slice(3))).toBe('line one\r\nline two');
-    expect(saved!.type).toBe('text/plain;charset=utf-8');
+    expect(saved).toBe(blob);
+    expect(document.querySelector('a[download]')).toBeNull(); // link removed again, no navigation
 
     create.mockRestore();
     revoke.mockRestore();

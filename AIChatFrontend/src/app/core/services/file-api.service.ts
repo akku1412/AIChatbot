@@ -1,8 +1,9 @@
-import { HttpClient, HttpEvent } from '@angular/common/http';
+import { HttpClient, HttpEvent, HttpResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
+import { readBlobErrors } from '../http/api-error';
 import { DEFAULT_UPLOAD_LIMITS, UploadLimits, UploadedFile } from '../models/chat.models';
 
 /** Typed calls for /api/files. Uploads report progress; unsubscribing cancels the request. */
@@ -35,6 +36,13 @@ export class FileApiService {
 
   get(fileId: string): Observable<UploadedFile> {
     return this.http.get<UploadedFile>(`${this.url}/${fileId}`);
+  }
+
+  /** The original uploaded file (owner only); the server names it in Content-Disposition. */
+  download(fileId: string): Observable<HttpResponse<Blob>> {
+    return this.http
+      .get(`${this.url}/${fileId}/download`, { observe: 'response', responseType: 'blob' })
+      .pipe(readBlobErrors());
   }
 
   delete(fileId: string): Observable<void> {

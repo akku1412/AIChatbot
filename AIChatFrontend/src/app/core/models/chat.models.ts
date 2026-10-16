@@ -34,6 +34,9 @@ export interface ChatMessage {
   attachments: AttachmentInfo[];
 }
 
+/** GET /api/messages/{id}/export?format=… */
+export type ExportFormat = 'txt' | 'pdf' | 'docx' | 'xlsx';
+
 export type FileStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
 
 /** POST /api/files/upload and GET /api/files/{id}. */

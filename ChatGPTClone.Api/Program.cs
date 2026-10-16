@@ -8,6 +8,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Repositories;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Export;
 using ChatGPTClone.Api.Services.Files;
 using ChatGPTClone.Api.Validators;
 using FluentValidation;
@@ -120,6 +121,7 @@ builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddScoped<IConversationExportService, ConversationExportService>();
+builder.Services.AddScoped<IResponseExportService, ResponseExportService>();
 
 // Documents: private storage, format-specific text extractors, upload/ownership logic, AI context retrieval.
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
@@ -186,6 +188,10 @@ builder.Services.AddRateLimiter(o =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => PerMinute(limits.UploadsPerMinute)));
+    o.AddPolicy(RateLimitPolicies.Exports, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => PerMinute(limits.ExportsPerMinute)));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => PerMinute(limits.GlobalPerMinute)));

@@ -3,8 +3,10 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
+import { readBlobErrors } from '../http/api-error';
 import {
   ConversationSummary,
+  ExportFormat,
   MessagePage,
   PagedResult,
   SendMessageResponse,
@@ -16,6 +18,7 @@ export class ChatApiService {
   private readonly http = inject(HttpClient);
   private readonly conversationsUrl = `${environment.apiBaseUrl}/conversations`;
   private readonly chatUrl = `${environment.apiBaseUrl}/chat`;
+  private readonly messagesUrl = `${environment.apiBaseUrl}/messages`;
 
   listConversations(page: number, pageSize: number): Observable<PagedResult<ConversationSummary>> {
     const params = new HttpParams().set('page', page).set('pageSize', pageSize);
@@ -40,7 +43,16 @@ export class ChatApiService {
 
   /** The whole conversation as a .txt file (the server names it in Content-Disposition). */
   exportConversation(conversationId: number): Observable<HttpResponse<Blob>> {
-    return this.http.get(`${this.conversationsUrl}/${conversationId}/export`, { observe: 'response', responseType: 'blob' });
+    return this.http
+      .get(`${this.conversationsUrl}/${conversationId}/export`, { observe: 'response', responseType: 'blob' })
+      .pipe(readBlobErrors());
+  }
+
+  /** One message (an AI reply) generated on the server as a real TXT, PDF, DOCX or XLSX file. */
+  exportMessage(messageId: number, format: ExportFormat): Observable<HttpResponse<Blob>> {
+    return this.http
+      .get(`${this.messagesUrl}/${messageId}/export`, { params: { format }, observe: 'response', responseType: 'blob' })
+      .pipe(readBlobErrors());
   }
 
   /** Newest page of messages; pass beforeMessageId to load older ones. Items are oldest-first. */

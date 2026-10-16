@@ -26,6 +26,17 @@ export function formatFileSize(bytes: number): string {
         <span class="name">{{ fileName() }}</span>
         <span class="meta" [class.error-text]="state() === 'error'">{{ meta() }}</span>
       </span>
+      @if (downloadable()) {
+        <button type="button" class="download" [disabled]="downloading()" [attr.aria-busy]="downloading()"
+                [attr.aria-label]="(downloading() ? 'Downloading ' : 'Download ') + fileName()"
+                [title]="downloading() ? 'Downloading…' : 'Download original file'" (click)="download.emit()">
+          @if (downloading()) {
+            <span class="spinner" aria-hidden="true"></span>
+          } @else {
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          }
+        </button>
+      }
       @if (removable()) {
         <button type="button" class="remove" [attr.aria-label]="'Remove ' + fileName()" (click)="remove.emit()">
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
@@ -69,11 +80,25 @@ export function formatFileSize(bytes: number): string {
       background: var(--surface-hover); color: var(--text); cursor: pointer;
     }
     .remove:hover { background: color-mix(in srgb, var(--danger) 18%, var(--surface-hover)); }
+    .download {
+      flex: none; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px;
+      background: transparent; color: var(--text-muted); cursor: pointer;
+    }
+    .download:hover:not(:disabled) { background: var(--surface-hover); color: var(--accent); }
+    .download:disabled { cursor: progress; }
+    .spinner {
+      width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+      border-top-color: var(--accent); animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--surface-hover); }
     .bar { display: block; height: 100%; background: var(--brand-gradient); transition: width 120ms linear; }
     .indeterminate .bar { width: 35%; animation: slide 1.1s ease-in-out infinite; }
     @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-    @media (prefers-reduced-motion: reduce) { .indeterminate .bar { animation: none; width: 100%; opacity: 0.5; } }
+    @media (prefers-reduced-motion: reduce) {
+      .indeterminate .bar { animation: none; width: 100%; opacity: 0.5; }
+      .spinner { animation-duration: 2.4s; }
+    }
   `,
 })
 export class AttachmentChip {
@@ -83,7 +108,11 @@ export class AttachmentChip {
   readonly progress = input(0);
   readonly error = input<string | null>(null);
   readonly removable = input(false);
+  /** Shows a download button for the original file (sent attachments). */
+  readonly downloadable = input(false);
+  readonly downloading = input(false);
   readonly remove = output<void>();
+  readonly download = output<void>();
 
   protected readonly extension = computed(() => {
     const name = this.fileName().toLowerCase();
