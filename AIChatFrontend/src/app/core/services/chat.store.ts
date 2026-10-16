@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, finalize, map, of, switchMap, tap } from 'rxjs';
 
 import { errorMessage } from '../http/api-error';
-import { ChatMessage, ConversationSummary } from '../models/chat.models';
+import { AttachmentInfo, ChatMessage, ConversationSummary } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
 
 const PAGE_SIZE = 20;
@@ -30,6 +30,8 @@ export class ChatStore {
   readonly messagesError = signal<string | null>(null);
   readonly hasOlderMessages = signal(false);
   readonly sending = signal(false);
+  /** True while the message being sent carries files (the reply takes longer: documents are read first). */
+  readonly sendingWithFiles = signal(false);
 
   readonly activeConversation = computed(
     () => this.conversationList().find((c) => c.conversationId === this.activeConversationId()) ?? null,
@@ -121,17 +123,19 @@ export class ChatStore {
    * Emits the conversation id so the caller can update the URL. The user's message is shown
    * immediately; on failure it is removed again and the error propagates to the caller.
    */
-  send(content: string): Observable<number> {
+  send(content: string, attachments: AttachmentInfo[] = []): Observable<number> {
     const optimistic: ChatMessage = {
       messageId: this.nextTempId--,
       role: 'user',
       content,
       createdAt: new Date().toISOString(),
       tokenUsage: null,
+      attachments,
     };
     this.messages.update((list) => [...list, optimistic]);
     this.messagesError.set(null);
     this.sending.set(true);
+    this.sendingWithFiles.set(attachments.length > 0);
 
     const existingId = this.activeConversationId();
     let createdId: number | null = null;
@@ -148,7 +152,7 @@ export class ChatStore {
 
     return conversationId$.pipe(
       switchMap((conversationId) =>
-        this.api.sendMessage(conversationId, content).pipe(
+        this.api.sendMessage(conversationId, content, attachments.map((a) => a.fileId)).pipe(
           tap((response) => {
             if (this.activeConversationId() === conversationId) {
               this.messages.update((list) => [

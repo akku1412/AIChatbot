@@ -47,7 +47,8 @@ export class ChatApiService {
     return this.http.get<MessagePage>(`${this.chatUrl}/${conversationId}/messages`, { params });
   }
 
-  sendMessage(conversationId: number, content: string): Observable<SendMessageResponse> {
-    return this.http.post<SendMessageResponse>(`${this.chatUrl}/${conversationId}/messages`, { content });
+  /** attachmentIds come from POST /api/files/upload; content may be empty when files are attached. */
+  sendMessage(conversationId: number, content: string, attachmentIds: string[] = []): Observable<SendMessageResponse> {
+    return this.http.post<SendMessageResponse>(`${this.chatUrl}/${conversationId}/messages`, { content, attachmentIds });
   }
 }

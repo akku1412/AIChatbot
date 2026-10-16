@@ -7,7 +7,7 @@ import { ChatStore } from '../../core/services/chat.store';
 import { AppLogo } from '../../shared/components/app-logo/app-logo';
 import { ChatMessageView } from '../../shared/components/chat-message/chat-message';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
-import { MessageInput } from '../../shared/components/message-input/message-input';
+import { ComposerSubmit, MessageInput } from '../../shared/components/message-input/message-input';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 import { TypingIndicator } from '../../shared/components/typing-indicator/typing-indicator';
 
@@ -94,10 +94,12 @@ export class ChatThread {
     this.composer()?.focus();
   }
 
-  protected send(text: string): void {
+  protected send({ text, attachments }: ComposerSubmit): void {
     this.draft.set('');
-    this.store.send(text).subscribe({
+    this.store.send(text, attachments).subscribe({
       next: (conversationId) => {
+        // The files now belong to the sent message. On failure they stay in the composer to retry.
+        this.composer()?.clearAttachments();
         if (!this.conversationId()) {
           // First message of a new chat: the conversation now exists, so give it a URL.
           this.router.navigate(['/chat', conversationId], { replaceUrl: true });

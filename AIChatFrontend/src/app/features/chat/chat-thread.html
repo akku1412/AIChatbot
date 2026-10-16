@@ -50,7 +50,7 @@
           <app-chat-message [message]="message" />
         }
         @if (store.sending()) {
-          <app-typing-indicator />
+          <app-typing-indicator [label]="store.sendingWithFiles() ? 'Reading your documents…' : ''" />
         }
       }
     </div>

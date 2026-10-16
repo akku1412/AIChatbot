@@ -1,18 +1,26 @@
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { MessageInput } from './message-input';
+import { ComposerSubmit, MessageInput } from './message-input';
 
 describe('MessageInput', () => {
   let fixture: ComponentFixture<MessageInput>;
+  let http: HttpTestingController;
   let textarea: HTMLTextAreaElement;
-  let sent: string[];
+  let sent: ComposerSubmit[];
 
   beforeEach(async () => {
-    await TestBed.configureTestingModule({ imports: [MessageInput] }).compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [MessageInput],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(MessageInput);
     sent = [];
-    fixture.componentInstance.send.subscribe((text) => sent.push(text));
+    fixture.componentInstance.send.subscribe((payload) => sent.push(payload));
     await fixture.whenStable();
+    http.match((req) => req.url.endsWith('/files/limits')); // keep the defaults
     textarea = fixture.nativeElement.querySelector('textarea');
   });
 
@@ -28,11 +36,21 @@ describe('MessageInput', () => {
     return event;
   }
 
+  function pick(...files: File[]): void {
+    const picker: HTMLInputElement = fixture.nativeElement.querySelector('input[type=file]');
+    // jsdom has no DataTransfer, so hand the input a plain FileList-like array.
+    Object.defineProperty(picker, 'files', { value: files, configurable: true });
+    picker.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+  }
+
+  const pdf = (name = 'report.pdf') => new File(['%PDF-1.4 test'], name, { type: 'application/pdf' });
+
   it('sends trimmed text on Enter', () => {
     type('  hello  ');
     const event = press({});
     expect(event.defaultPrevented).toBe(true);
-    expect(sent).toEqual(['hello']);
+    expect(sent).toEqual([{ text: 'hello', attachments: [] }]);
   });
 
   it('does not send on Shift+Enter (new line instead)', () => {
@@ -55,5 +73,65 @@ describe('MessageInput', () => {
     type('hi');
     press({});
     expect(sent).toEqual([]);
+  });
+
+  it('rejects unsupported files without uploading them', () => {
+    pick(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+    http.expectNone((req) => req.url.endsWith('/files/upload'));
+    expect(fixture.nativeElement.querySelector('app-attachment-chip')).toBeNull();
+  });
+
+  it('uploads a file, blocks sending until it is ready, then sends its id', () => {
+    pick(pdf());
+    const upload = http.expectOne((req) => req.url.endsWith('/files/upload'));
+    expect(fixture.nativeElement.querySelector('app-attachment-chip')).not.toBeNull();
+
+    type('summarize');
+    press({});
+    expect(sent).toEqual([]); // still uploading
+
+    upload.flush({
+      fileId: 'f1', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13,
+      status: 'completed', statusMessage: null, pageCount: 1, sheetCount: null, chunkCount: 1, uploadedAt: '',
+    });
+    fixture.detectChanges();
+    press({});
+    expect(sent).toEqual([
+      { text: 'summarize', attachments: [{ fileId: 'f1', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13 }] },
+    ]);
+  });
+
+  it('allows sending files without any text', () => {
+    pick(pdf());
+    http.expectOne((req) => req.url.endsWith('/files/upload')).flush({
+      fileId: 'f2', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13,
+      status: 'completed', statusMessage: null, pageCount: 1, sheetCount: null, chunkCount: 1, uploadedAt: '',
+    });
+    fixture.detectChanges();
+    press({});
+    expect(sent.length).toBe(1);
+    expect(sent[0].text).toBe('');
+  });
+
+  it('removing an uploaded file deletes it on the server', () => {
+    pick(pdf());
+    http.expectOne((req) => req.url.endsWith('/files/upload')).flush({
+      fileId: 'f3', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13,
+      status: 'completed', statusMessage: null, pageCount: 1, sheetCount: null, chunkCount: 1, uploadedAt: '',
+    });
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('app-attachment-chip .remove') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const del = http.expectOne((req) => req.method === 'DELETE' && req.url.endsWith('/files/f3'));
+    del.flush(null);
+    expect(fixture.nativeElement.querySelector('app-attachment-chip')).toBeNull();
+  });
+
+  it('removing a file mid-upload cancels the request', () => {
+    pick(pdf());
+    const upload = http.expectOne((req) => req.url.endsWith('/files/upload'));
+    (fixture.nativeElement.querySelector('app-attachment-chip .remove') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(upload.cancelled).toBe(true);
   });
 });

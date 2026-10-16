@@ -1,15 +1,18 @@
-import { Component } from '@angular/core';
+import { Component, input } from '@angular/core';
 
 import { AppLogo } from '../app-logo/app-logo';
 
-/** Shown in the thread while the AI is generating a reply. */
+/** Shown in the thread while the AI is generating a reply; an optional label says what it is doing. */
 @Component({
   selector: 'app-typing-indicator',
   imports: [AppLogo],
   template: `
-    <div class="row" role="status" aria-label="AIChat is thinking">
+    <div class="row" role="status" [attr.aria-label]="label() || 'AIChat is thinking'">
       <app-logo [size]="30" />
       <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      @if (label()) {
+        <span class="label">{{ label() }}</span>
+      }
     </div>
   `,
   styles: `
@@ -18,8 +21,11 @@ import { AppLogo } from '../app-logo/app-logo';
     .dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
     .dots span:nth-child(2) { animation-delay: 0.15s; }
     .dots span:nth-child(3) { animation-delay: 0.3s; }
+    .label { font-size: 0.875rem; color: var(--text-muted); }
     @keyframes pulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); } 40% { opacity: 1; transform: scale(1); } }
     @media (prefers-reduced-motion: reduce) { .dots span { animation: none; opacity: 0.6; } }
   `,
 })
-export class TypingIndicator {}
+export class TypingIndicator {
+  readonly label = input('');
+}

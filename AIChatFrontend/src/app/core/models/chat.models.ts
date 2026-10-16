@@ -17,13 +17,52 @@ export interface PagedResult<T> {
 
 export type MessageRole = 'user' | 'assistant';
 
+/** A file shown on a chat message. */
+export interface AttachmentInfo {
+  fileId: string;
+  fileName: string;
+  fileExtension: string;
+  fileSize: number;
+}
+
 export interface ChatMessage {
   messageId: number;
   role: MessageRole;
   content: string;
   createdAt: string;
   tokenUsage: number | null;
+  attachments: AttachmentInfo[];
 }
+
+export type FileStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
+
+/** POST /api/files/upload and GET /api/files/{id}. */
+export interface UploadedFile {
+  fileId: string;
+  fileName: string;
+  fileExtension: string;
+  contentType: string;
+  fileSize: number;
+  status: FileStatus;
+  statusMessage: string | null;
+  pageCount: number | null;
+  extractedCharacters: number;
+  createdAt: string;
+}
+
+/** GET /api/files/limits (mirrors the server's FileUploads settings). */
+export interface UploadLimits {
+  maxFileSizeBytes: number;
+  maxFilesPerMessage: number;
+  allowedExtensions: string[];
+}
+
+/** Used until /api/files/limits answers; the server enforces the real values anyway. */
+export const DEFAULT_UPLOAD_LIMITS: UploadLimits = {
+  maxFileSizeBytes: 20 * 1024 * 1024,
+  maxFilesPerMessage: 5,
+  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls'],
+};
 
 export interface MessagePage {
   items: ChatMessage[];

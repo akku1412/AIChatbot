@@ -1,95 +1,172 @@
-import { Component, ElementRef, computed, effect, input, model, output, viewChild } from '@angular/core';
+import { HttpEventType } from '@angular/common/http';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  input,
+  model,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { Subscription } from 'rxjs';
 
-import { MAX_MESSAGE_LENGTH } from '../../../core/models/chat.models';
+import { errorMessage } from '../../../core/http/api-error';
+import { AttachmentInfo, MAX_MESSAGE_LENGTH, UploadedFile } from '../../../core/models/chat.models';
+import { FileApiService } from '../../../core/services/file-api.service';
+import { AttachmentChip, ChipState, formatFileSize } from '../attachment-chip/attachment-chip';
+import { NotificationService } from '../toast/notification.service';
+
+/** What the composer hands to the chat when the user sends. */
+export interface ComposerSubmit {
+  text: string;
+  attachments: AttachmentInfo[];
+}
+
+interface PendingAttachment {
+  id: number;
+  file: File;
+  state: ChipState;
+  progress: number;
+  error: string | null;
+  uploaded: UploadedFile | null;
+  subscription: Subscription | null;
+}
 
 /**
- * Multiline composer. Enter sends, Shift+Enter inserts a new line, and Enter during IME composition
- * (e.g. Hindi/Japanese keyboards) never sends. Grows with its content up to a max height.
+ * Multiline composer with file attachments.
+ * - Enter sends, Shift+Enter inserts a new line; Enter during IME composition never sends.
+ * - Files (paperclip, or drag & drop onto the composer) are checked locally, then uploaded at once with
+ *   progress; the server extracts their text. Removing a file cancels its upload or deletes it on the server.
+ * - Sending waits until every attached file is ready.
  */
 @Component({
   selector: 'app-message-input',
-  template: `
-    <form class="composer" (submit)="$event.preventDefault(); submit()">
-      <textarea
-        #box
-        rows="1"
-        [value]="text()"
-        [attr.maxlength]="maxLength"
-        [placeholder]="placeholder()"
-        [disabled]="disabled()"
-        aria-label="Message"
-        (input)="onInput($event)"
-        (keydown)="onKeydown($event)"
-      ></textarea>
-      <button type="submit" class="send" [disabled]="!canSend()" [attr.aria-label]="busy() ? 'Sending' : 'Send message'">
-        @if (busy()) {
-          <span class="stop" aria-hidden="true"></span>
-        } @else {
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        }
-      </button>
-    </form>
-    <p class="hint">
-      @if (remaining() < 500) {
-        <span [class.over]="remaining() <= 0">{{ remaining() }} characters left · </span>
-      }
-      <span class="keys">Enter to send · Shift + Enter for a new line</span>
-    </p>
-  `,
-  styles: `
-    :host { display: block; }
-    .composer {
-      display: flex; align-items: flex-end; gap: 8px;
-      padding: 8px 8px 8px 16px; border: 1px solid var(--border); border-radius: 24px;
-      background: var(--surface-raised); box-shadow: var(--shadow-md);
-    }
-    .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-md); }
-    textarea {
-      flex: 1; resize: none; border: 0; outline: none; background: transparent; color: var(--text);
-      font: inherit; line-height: 1.5; padding: 8px 0; max-height: 200px; overflow-y: auto;
-    }
-    textarea::placeholder { color: var(--text-muted); }
-    .send {
-      flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0;
-      display: grid; place-items: center; cursor: pointer;
-      background: var(--brand-gradient); color: #fff; box-shadow: 0 4px 12px color-mix(in srgb, #6366f1 35%, transparent);
-    }
-    .send:disabled { background: var(--surface-hover); color: var(--text-muted); box-shadow: none; cursor: not-allowed; }
-    .stop { width: 12px; height: 12px; border-radius: 2px; background: currentColor; }
-    .hint { margin: 6px 0 0; text-align: center; font-size: 0.75rem; color: var(--text-muted); }
-    .hint .over { color: var(--danger); }
-    @media (max-width: 640px) { .keys { display: none; } }
-  `,
+  imports: [AttachmentChip],
+  host: {
+    '(dragenter)': 'onDragOver($event)',
+    '(dragover)': 'onDragOver($event)',
+    '(dragleave)': 'onDragLeave($event)',
+    '(drop)': 'onDrop($event)',
+  },
+  templateUrl: './message-input.html',
+  styleUrl: './message-input.css',
 })
 export class MessageInput {
+  private readonly fileApi = inject(FileApiService);
+  private readonly notifications = inject(NotificationService);
+
   /** Two-way bound draft text, so the parent can restore it after a failed send. */
   readonly text = model('');
   readonly disabled = input(false);
   /** True while a reply is being generated: typing is allowed, sending is not. */
   readonly busy = input(false);
   readonly placeholder = input('Message AIChat');
-  readonly send = output<string>();
+  readonly send = output<ComposerSubmit>();
 
   protected readonly maxLength = MAX_MESSAGE_LENGTH;
+  protected readonly attachments = signal<PendingAttachment[]>([]);
+  protected readonly dragging = signal(false);
+  protected readonly limits = this.fileApi.limits;
+  protected readonly accept = computed(() => this.limits().allowedExtensions.join(','));
+
   protected readonly remaining = computed(() => MAX_MESSAGE_LENGTH - this.text().length);
+  protected readonly uploading = computed(() =>
+    this.attachments().some((a) => a.state === 'uploading' || a.state === 'processing'),
+  );
+  protected readonly hasErrors = computed(() => this.attachments().some((a) => a.state === 'error'));
+  protected readonly readyFiles = computed(() =>
+    this.attachments().filter((a) => a.state === 'ready' && a.uploaded).map((a) => a.uploaded!),
+  );
   protected readonly canSend = computed(
-    () => !this.disabled() && !this.busy() && this.text().trim().length > 0 && this.remaining() >= 0,
+    () =>
+      !this.disabled() &&
+      !this.busy() &&
+      !this.uploading() &&
+      !this.hasErrors() &&
+      (this.text().trim().length > 0 || this.readyFiles().length > 0) &&
+      this.remaining() >= 0,
   );
 
   private readonly box = viewChild.required<ElementRef<HTMLTextAreaElement>>('box');
+  private readonly picker = viewChild.required<ElementRef<HTMLInputElement>>('picker');
+  private nextId = 1;
 
   constructor() {
+    this.fileApi.loadLimits();
+
     // Keep the height in sync when the text changes from outside (cleared or restored).
     effect(() => {
       this.text();
       queueMicrotask(() => this.autosize());
     });
+
+    // Leaving the page cancels uploads still in flight.
+    inject(DestroyRef).onDestroy(() => this.attachments().forEach((a) => a.subscription?.unsubscribe()));
   }
 
   focus(): void {
     this.box().nativeElement.focus();
+  }
+
+  /** Called by the chat after a successful send: the files now belong to the message, so keep them on the server. */
+  clearAttachments(): void {
+    this.attachments.set([]);
+  }
+
+  protected openPicker(): void {
+    this.picker().nativeElement.click();
+  }
+
+  protected onPicked(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.addFiles(Array.from(input.files ?? []));
+    input.value = ''; // allow picking the same file again
+  }
+
+  protected onDragOver(event: DragEvent): void {
+    if (this.disabled() || !event.dataTransfer?.types.includes('Files')) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    this.dragging.set(true);
+  }
+
+  protected onDragLeave(event: DragEvent): void {
+    // Only when the pointer really leaves the composer (not when moving over a child element).
+    const host = event.currentTarget as HTMLElement;
+    if (!event.relatedTarget || !host.contains(event.relatedTarget as Node)) {
+      this.dragging.set(false);
+    }
+  }
+
+  protected onDrop(event: DragEvent): void {
+    if (!event.dataTransfer?.files.length) {
+      return;
+    }
+    event.preventDefault();
+    this.dragging.set(false);
+    if (!this.disabled()) {
+      this.addFiles(Array.from(event.dataTransfer.files));
+    }
+  }
+
+  protected remove(id: number): void {
+    const attachment = this.attachments().find((a) => a.id === id);
+    if (!attachment) {
+      return;
+    }
+    // Cancels the HTTP upload if it is still running.
+    attachment.subscription?.unsubscribe();
+    if (attachment.uploaded) {
+      // Uploaded but never sent: don't leave an orphan on the server.
+      this.fileApi.delete(attachment.uploaded.fileId).subscribe({ error: () => undefined });
+    }
+    this.attachments.update((list) => list.filter((a) => a.id !== id));
   }
 
   protected onInput(event: Event): void {
@@ -107,7 +184,71 @@ export class MessageInput {
     if (!this.canSend()) {
       return;
     }
-    this.send.emit(this.text().trim());
+    this.send.emit({
+      text: this.text().trim(),
+      attachments: this.readyFiles().map((f) => ({
+        fileId: f.fileId,
+        fileName: f.fileName,
+        fileExtension: f.fileExtension,
+        fileSize: f.fileSize,
+      })),
+    });
+  }
+
+  private addFiles(files: File[]): void {
+    const { maxFileSizeBytes, maxFilesPerMessage, allowedExtensions } = this.limits();
+    const room = maxFilesPerMessage - this.attachments().filter((a) => a.state !== 'error').length;
+
+    if (files.length > room) {
+      this.notifications.error(`You can attach up to ${maxFilesPerMessage} files to one message.`);
+      files = files.slice(0, Math.max(room, 0));
+    }
+
+    for (const file of files) {
+      const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
+      if (!allowedExtensions.includes(extension)) {
+        this.notifications.error(`"${file.name}" isn't supported. Attach PDF, Word (.docx) or Excel (.xlsx, .xls) files.`);
+        continue;
+      }
+      if (file.size === 0) {
+        this.notifications.error(`"${file.name}" is empty.`);
+        continue;
+      }
+      if (file.size > maxFileSizeBytes) {
+        this.notifications.error(`"${file.name}" is ${formatFileSize(file.size)}; the limit is ${formatFileSize(maxFileSizeBytes)}.`);
+        continue;
+      }
+      this.startUpload(file);
+    }
+  }
+
+  private startUpload(file: File): void {
+    const id = this.nextId++;
+    this.attachments.update((list) => [
+      ...list,
+      { id, file, state: 'uploading', progress: 0, error: null, uploaded: null, subscription: null },
+    ]);
+
+    const subscription = this.fileApi.upload(file).subscribe({
+      next: (event) => {
+        if (event.type === HttpEventType.UploadProgress) {
+          const progress = event.total ? Math.round((event.loaded / event.total) * 100) : 0;
+          // All bytes sent: the server is now reading the document.
+          this.patch(id, progress >= 100 ? { state: 'processing', progress: 100 } : { progress });
+        } else if (event.type === HttpEventType.Response && event.body) {
+          const uploaded = event.body;
+          this.patch(id, uploaded.status === 'completed'
+            ? { state: 'ready', uploaded, subscription: null }
+            : { state: 'error', error: uploaded.statusMessage ?? 'This file could not be read.', subscription: null });
+        }
+      },
+      error: (err: unknown) => this.patch(id, { state: 'error', error: errorMessage(err), subscription: null }),
+    });
+    this.patch(id, { subscription });
+  }
+
+  private patch(id: number, changes: Partial<PendingAttachment>): void {
+    this.attachments.update((list) => list.map((a) => (a.id === id ? { ...a, ...changes } : a)));
   }
 
   private autosize(): void {

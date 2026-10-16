@@ -98,7 +98,7 @@ cd AIChatFrontend;    npm start                             # http://localhost:4
 ### 6. Tests
 
 ```powershell
-dotnet test ChatGPTClone.Api.Tests      # 71 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
+dotnet test ChatGPTClone.Api.Tests      # 104 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
 cd AIChatFrontend; npx ng test --watch=false
 ```
 
@@ -119,7 +119,11 @@ limiting, ownership checks) is real. Set `CHATGPTCLONE_TEST_DB` to use another S
 | PUT | `/api/users/me` | JWT | `{ "fullName" }` |
 | GET/POST | `/api/conversations` | JWT | list (`?page&pageSize`) / create |
 | GET/PUT/DELETE | `/api/conversations/{id}` | JWT | get / rename `{ "title" }` / delete |
-| GET/POST | `/api/chat/{id}/messages` | JWT | list (`?limit&before`) / send `{ "content" }` |
+| GET/POST | `/api/chat/{id}/messages` | JWT | list (`?limit&before`) / send `{ "content", "attachmentIds" }` |
+| POST | `/api/files/upload` | JWT | `multipart/form-data`, field `file` → extracted, returns the file record |
+| GET | `/api/files/limits` | JWT | max size, max files per message, allowed extensions |
+| GET | `/api/files` · `/api/files/{fileId}` | JWT | your uploads / one upload (owner only, 404 otherwise) |
+| DELETE | `/api/files/{fileId}` | JWT | deletes your upload (stored file, chunks and message links; the message text stays) |
 
 Errors are RFC 7807 `application/problem+json` with `title`, `detail`, and sometimes `reason`,
 `attemptsRemaining` or `retryAfterSeconds`.
@@ -163,6 +167,46 @@ Content-Type: application/json
 Google sign-in needs a real ID token from the browser, so test it through the app (or Swagger with a token copied
 from the browser's network tab for `/api/auth/google`).
 
+Files: in Postman choose **Body → form-data**, key `file` (type *File*), then send the returned `fileId` with a message.
+
+```http
+POST /api/files/upload
+Authorization: Bearer eyJ...
+Content-Type: multipart/form-data; boundary=...   (Postman sets this)
+```
+→ `200 { "fileId": "3f2b...", "fileName": "policy.pdf", "fileExtension": ".pdf", "fileSize": 1491, "status": "completed", "pageCount": 2, ... }`
+→ `400` unsupported type / content doesn't match the extension / password-protected / scanned PDF with no text ·
+`413` larger than 20 MB · `429` more than 20 uploads a minute
+
+```http
+POST /api/chat/12/messages
+Authorization: Bearer eyJ...
+Content-Type: application/json
+
+{ "content": "What is the leave policy?", "attachmentIds": ["3f2b..."] }
+```
+`content` may be empty when files are attached (the AI then summarizes them). Up to 5 files per message.
+
+## File upload and document Q&A
+
+- Formats: **PDF** (text-based; scanned/image-only PDFs are rejected because OCR is not implemented), **Word .docx**,
+  **Excel .xlsx / .xls** (all sheets). Old `.doc` is not supported. `.xls` uses ExcelDataReader's binary reader; it is
+  covered by the code path but has not been tested with a real `.xls` file yet.
+- Limits (`FileUploads` in `appsettings.json`, enforced on the server and mirrored in the UI via `/api/files/limits`):
+  `MaxFileSizeBytes` 20 MB, `MaxFilesPerMessage` 5, `MaxExtractedCharacters`, `MaxRowsPerSheet`, `ChunkCharacters`,
+  `MaxDocumentContextCharacters`, `StoragePath` (default `App_Data/uploads`, outside `wwwroot`).
+- Flow: upload → magic-byte check → stored under a random name → text extracted into `DocumentChunks` → on send, the
+  most relevant chunks (keyword scoring) of each attached file are added to the prompt with file/page/sheet labels.
+  Files attached earlier in the same conversation stay available for follow-up questions.
+- Excel: totals, averages, min/max, blanks and row counts are computed in .NET and given to the model, so numbers in
+  answers come from code, not from the model doing arithmetic.
+- Safety: document text is wrapped as untrusted data; the system prompt tells the model never to follow instructions
+  found inside documents. File paths are never returned by the API; every file query is filtered by the owner.
+- Tables: `UploadedFiles`, `DocumentChunks`, `MessageAttachments`.
+- Libraries: UglyToad.PdfPig (Apache-2.0), DocumentFormat.OpenXml (MIT), ExcelDataReader (MIT); ClosedXML (MIT) in tests only.
+- Before production: move storage to a private blob container, add malware scanning of uploads, and schedule clean-up
+  of uploads that were never attached to a message.
+
 ## End-to-end checklist
 
 - [ ] Email: enter an address → **Send OTP** → code arrives (check spam) → enter it → chat opens.
@@ -175,6 +219,8 @@ from the browser's network tab for `/api/auth/google`).
 - [ ] Reload `/chat` → still signed in; **Log out** → `/chat` redirects to login.
 - [ ] Chat: send a message → AI reply (Markdown, code copy); rename and delete a conversation (with confirmation).
 - [ ] Another user cannot open your conversation URL (404).
+- [ ] Files: paperclip or drag & drop a PDF, DOCX and XLSX → chips show progress then size; a `.txt` or a >20 MB file is
+      refused with a message; removing a chip cancels/deletes it; ask a question → answer cites the file; reload → chips stay on the message.
 - [ ] Mobile width: login, code page, chat drawer and profile are usable.
 
 ## Production configuration

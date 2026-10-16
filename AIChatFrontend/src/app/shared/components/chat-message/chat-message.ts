@@ -2,6 +2,7 @@ import { Component, computed, inject, input, signal } from '@angular/core';
 
 import { ChatMessage } from '../../../core/models/chat.models';
 import { AppLogo } from '../app-logo/app-logo';
+import { AttachmentChip } from '../attachment-chip/attachment-chip';
 import { MarkdownView } from '../markdown/markdown';
 import { NotificationService } from '../toast/notification.service';
 
@@ -11,7 +12,7 @@ import { NotificationService } from '../toast/notification.service';
  */
 @Component({
   selector: 'app-chat-message',
-  imports: [AppLogo, MarkdownView],
+  imports: [AppLogo, AttachmentChip, MarkdownView],
   template: `
     <article class="message" [class.user]="isUser()" [class.assistant]="!isUser()" [attr.aria-label]="isUser() ? 'You said' : 'AIChat replied'">
       @if (!isUser()) {
@@ -19,7 +20,16 @@ import { NotificationService } from '../toast/notification.service';
       }
       <div class="body">
         @if (isUser()) {
-          <div class="content">{{ message().content }}</div>
+          @if (message().attachments.length) {
+            <div class="files" role="list" aria-label="Attached files">
+              @for (file of message().attachments; track file.fileId) {
+                <app-attachment-chip role="listitem" state="sent" [fileName]="file.fileName" [fileSize]="file.fileSize" />
+              }
+            </div>
+          }
+          @if (message().content) {
+            <div class="content">{{ message().content }}</div>
+          }
         } @else {
           <app-markdown [content]="message().content" />
         }
@@ -47,6 +57,8 @@ import { NotificationService } from '../toast/notification.service';
       background: color-mix(in srgb, var(--accent) 12%, var(--surface)); padding: 10px 16px;
       border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 18px 18px 6px 18px;
     }
+    .user .body { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+    .files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 100%; }
     .assistant .body { flex: 1; min-width: 0; }
     .content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
     .avatar { margin-top: 2px; }
