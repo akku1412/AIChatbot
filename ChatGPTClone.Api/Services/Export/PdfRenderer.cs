@@ -26,7 +26,7 @@ public static class PdfRenderer
         foreach (var file in Directory.Exists(fontsFolder) ? Directory.GetFiles(fontsFolder, "*.ttf") : [])
         {
             using var font = File.OpenRead(file);
-            FontManager.RegisterFont(font);
+            FontManager.RegisterFontFromStream(font);
         }
     }
 

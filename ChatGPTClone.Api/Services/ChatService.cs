@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.DTOs.Chat;
 using ChatGPTClone.Api.Interfaces;
@@ -15,6 +16,43 @@ public interface IChatService
 
     Task<SendMessageResponse> SendAsync(int userId, int conversationId, string? content, IReadOnlyList<Guid>? attachmentIds,
         CancellationToken cancellationToken);
+
+    /// <summary>Checks ownership and files, then builds the prompt for a new user message. Nothing is saved yet.</summary>
+    Task<ChatTurn> PrepareTurnAsync(int userId, int conversationId, string? content, IReadOnlyList<Guid>? attachmentIds,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// A new reply to the conversation's last user message. If the conversation ends with an AI reply,
+    /// that reply is replaced once the new one is saved. 409 when there is no user message to answer.
+    /// </summary>
+    Task<ChatTurn> PrepareRegenerationAsync(int userId, int conversationId, CancellationToken cancellationToken);
+
+    /// <summary>The AI reply as it is generated; provider failures become ApiExceptions (502/503/504...).</summary>
+    IAsyncEnumerable<AiStreamUpdate> StreamReplyAsync(ChatTurn turn, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Saves the turn: the user message (unless regenerating) and the reply if it has any text — also when the user
+    /// stopped generation part-way. Generates the conversation title after the first exchange.
+    /// </summary>
+    Task<StreamTurnResult> SaveTurnAsync(ChatTurn turn, string reply, int? totalTokens, bool stopped, bool truncated,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Everything needed to generate and save one reply. Created by PrepareTurnAsync / PrepareRegenerationAsync.</summary>
+public sealed class ChatTurn
+{
+    public required Conversation Conversation { get; init; }
+    public required string Text { get; init; }
+    public required List<UploadedFile> NewFiles { get; init; }
+    public required List<AiChatMessage> Prompt { get; init; }
+    public required bool IsFirstExchange { get; init; }
+    public required int ContextFileCount { get; init; }
+
+    /// <summary>Regeneration: the already-saved question being answered again.</summary>
+    public Message? ExistingUserMessage { get; init; }
+
+    /// <summary>Regeneration: the previous reply, deleted when the new one is saved.</summary>
+    public long? ReplacedMessageId { get; init; }
 }
 
 public sealed class ChatService(
@@ -61,60 +99,173 @@ public sealed class ChatService(
     public async Task<SendMessageResponse> SendAsync(int userId, int conversationId, string? content,
         IReadOnlyList<Guid>? attachmentIds, CancellationToken cancellationToken)
     {
+        var turn = await PrepareTurnAsync(userId, conversationId, content, attachmentIds, cancellationToken);
+
+        // Ask the AI first: if it fails, nothing is saved, so the user can simply resend.
+        var completion = await CompleteAsync(turn.Prompt, _options.MaxOutputTokens, cancellationToken);
+        var (userMessage, assistantMessage) = await PersistAsync(turn, completion.Content, completion.TotalTokens,
+            stopped: false, completion.Truncated, cancellationToken);
+
+        return new SendMessageResponse(
+            MessageDto.From(userMessage), MessageDto.From(assistantMessage!), ConversationDto.From(turn.Conversation));
+    }
+
+    public async Task<ChatTurn> PrepareTurnAsync(int userId, int conversationId, string? content,
+        IReadOnlyList<Guid>? attachmentIds, CancellationToken cancellationToken)
+    {
         var conversation = await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
 
         // Attached files must belong to this user and be fully processed.
         var newFiles = await fileService.GetReadyFilesAsync(userId, attachmentIds?.Distinct().ToList() ?? [], cancellationToken);
         var text = string.IsNullOrWhiteSpace(content) ? DefaultFileQuestion : content.Trim();
-
         var history = await messageRepository.GetRecentAsync(conversationId, _options.MaxHistoryMessages, cancellationToken);
-        var isFirstExchange = history.Count == 0;
 
+        return await BuildTurnAsync(userId, conversation, text, newFiles, history, existingUserMessage: null,
+            replacedMessageId: null, cancellationToken);
+    }
+
+    public async Task<ChatTurn> PrepareRegenerationAsync(int userId, int conversationId, CancellationToken cancellationToken)
+    {
+        var conversation = await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
+        var recent = await messageRepository.GetRecentAsync(conversationId, _options.MaxHistoryMessages + 2, cancellationToken);
+
+        // The question is the last user message; a reply after it (if any) is the one being replaced.
+        var questionIndex = recent.FindLastIndex(m => m.Role == MessageRole.User);
+        var trailing = recent.Skip(questionIndex + 1).ToList();
+        if (questionIndex < 0 || trailing.Count > 1 || trailing.Any(m => m.Role != MessageRole.Assistant))
+        {
+            throw new ApiException(StatusCodes.Status409Conflict, "Nothing to regenerate",
+                "Only the latest reply can be regenerated.", new Dictionary<string, object?> { ["reason"] = "nothing_to_regenerate" });
+        }
+
+        var question = recent[questionIndex];
+        // Files that were deleted since are simply no longer attached (their links are removed with them).
+        var files = await fileService.GetReadyFilesAsync(userId, question.Attachments.Select(a => a.FileId).ToList(), cancellationToken);
+
+        return await BuildTurnAsync(userId, conversation, question.Content, files, recent.Take(questionIndex).ToList(),
+            existingUserMessage: question, replacedMessageId: trailing.FirstOrDefault()?.MessageId, cancellationToken);
+    }
+
+    private async Task<ChatTurn> BuildTurnAsync(int userId, Conversation conversation, string text, List<UploadedFile> newFiles,
+        List<Message> history, Message? existingUserMessage, long? replacedMessageId, CancellationToken cancellationToken)
+    {
         // Files attached now, plus files attached earlier in this conversation (for follow-up questions).
         var newIds = newFiles.Select(f => f.FileId).ToHashSet();
-        var earlierIds = (await messageRepository.GetRecentAttachmentFileIdsAsync(conversationId, _fileOptions.MaxFilesInContext, cancellationToken))
+        var earlierIds = (await messageRepository.GetRecentAttachmentFileIdsAsync(conversation.ConversationId,
+                _fileOptions.MaxFilesInContext, cancellationToken))
             .Where(id => !newIds.Contains(id))
             .ToList();
         var earlierFiles = await fileService.GetReadyFilesAsync(userId, earlierIds, cancellationToken);
         var contextFiles = newFiles.Concat(earlierFiles).Take(_fileOptions.MaxFilesInContext).ToList();
         var documents = await documentContext.BuildAsync(contextFiles, text, cancellationToken);
 
-        var prompt = BuildPrompt(history, WithAttachmentNote(text, newFiles.Select(f => f.OriginalFileName)), documents);
-
-        // Ask the AI first: if it fails, nothing is saved, so the user can simply resend.
-        var completion = await CompleteAsync(prompt, _options.MaxOutputTokens, cancellationToken);
-
-        var userMessage = new Message { ConversationId = conversationId, Role = MessageRole.User, Content = text };
-        foreach (var file in newFiles)
+        return new ChatTurn
         {
-            userMessage.Attachments.Add(new MessageAttachment { FileId = file.FileId, File = file });
-        }
-        messageRepository.Add(userMessage);
-        await messageRepository.SaveChangesAsync(cancellationToken);
-
-        // Saved separately so the assistant reply always gets the higher MessageId (message order = id order).
-        var assistantMessage = new Message
-        {
-            ConversationId = conversationId,
-            Role = MessageRole.Assistant,
-            Content = completion.Content,
-            TokenUsage = completion.TotalTokens,
+            Conversation = conversation,
+            Text = text,
+            NewFiles = newFiles,
+            Prompt = BuildPrompt(history, WithAttachmentNote(text, newFiles.Select(f => f.OriginalFileName)), documents),
+            IsFirstExchange = history.Count == 0,
+            ContextFileCount = contextFiles.Count,
+            ExistingUserMessage = existingUserMessage,
+            ReplacedMessageId = replacedMessageId,
         };
-        messageRepository.Add(assistantMessage);
+    }
 
-        if (isFirstExchange && conversation.Title == ConversationService.DefaultTitle)
+    public async IAsyncEnumerable<AiStreamUpdate> StreamReplyAsync(ChatTurn turn,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var updates = aiProvider.StreamAsync(turn.Prompt, _options.MaxOutputTokens, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        try
         {
-            conversation.Title = await GenerateTitleAsync(text, completion.Content, cancellationToken);
+            while (true)
+            {
+                try
+                {
+                    if (!await updates.MoveNextAsync())
+                    {
+                        yield break;
+                    }
+                }
+                catch (AiProviderException ex)
+                {
+                    logger.LogWarning("AI provider {Provider} failed while streaming: {Kind}", aiProvider.Name, ex.Kind);
+                    throw ToApiException(ex.Kind);
+                }
+                yield return updates.Current;
+            }
+        }
+        finally
+        {
+            await updates.DisposeAsync();
+        }
+    }
+
+    public async Task<StreamTurnResult> SaveTurnAsync(ChatTurn turn, string reply, int? totalTokens, bool stopped, bool truncated,
+        CancellationToken cancellationToken)
+    {
+        var (userMessage, assistantMessage) = await PersistAsync(turn, reply, totalTokens, stopped, truncated, cancellationToken);
+        return new StreamTurnResult(
+            MessageDto.From(userMessage),
+            assistantMessage is null ? null : MessageDto.From(assistantMessage),
+            ConversationDto.From(turn.Conversation),
+            stopped,
+            truncated,
+            assistantMessage is null ? null : turn.ReplacedMessageId);
+    }
+
+    private async Task<(Message User, Message? Assistant)> PersistAsync(ChatTurn turn, string reply, int? totalTokens,
+        bool stopped, bool truncated, CancellationToken cancellationToken)
+    {
+        var conversation = turn.Conversation;
+        var userMessage = turn.ExistingUserMessage;
+        if (userMessage is null)
+        {
+            userMessage = new Message { ConversationId = conversation.ConversationId, Role = MessageRole.User, Content = turn.Text };
+            foreach (var file in turn.NewFiles)
+            {
+                userMessage.Attachments.Add(new MessageAttachment { FileId = file.FileId, File = file });
+            }
+            messageRepository.Add(userMessage);
+            await messageRepository.SaveChangesAsync(cancellationToken);
+        }
+
+        // Saved separately so the reply always gets the higher MessageId (message order = id order).
+        // A generation stopped before any text keeps just the question; the user can regenerate it later.
+        Message? assistantMessage = null;
+        if (!string.IsNullOrWhiteSpace(reply))
+        {
+            assistantMessage = new Message
+            {
+                ConversationId = conversation.ConversationId,
+                Role = MessageRole.Assistant,
+                Content = reply.Trim(),
+                TokenUsage = totalTokens,
+            };
+            messageRepository.Add(assistantMessage);
+        }
+
+        if (turn.IsFirstExchange && conversation.Title == ConversationService.DefaultTitle)
+        {
+            conversation.Title = assistantMessage is null || stopped
+                ? FallbackTitle(turn.Text)
+                : await GenerateTitleAsync(turn.Text, assistantMessage.Content, cancellationToken);
         }
         conversation.UpdatedAt = DateTime.UtcNow; // marks it modified; AppDbContext stamps the exact time
         await conversationRepository.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation(
-            "Conversation {ConversationId}: reply from {Provider}, {Tokens} tokens, {Files} files in context{Truncated}",
-            conversationId, aiProvider.Name, completion.TotalTokens, contextFiles.Count, completion.Truncated ? " (truncated)" : "");
+        if (assistantMessage is not null && turn.ReplacedMessageId is { } replaced)
+        {
+            // Only after the new reply is safely saved.
+            await messageRepository.DeleteAsync(replaced, cancellationToken);
+        }
 
-        return new SendMessageResponse(
-            MessageDto.From(userMessage), MessageDto.From(assistantMessage), ConversationDto.From(conversation));
+        logger.LogInformation(
+            "Conversation {ConversationId}: reply from {Provider}, {Tokens} tokens, {Files} files in context{Truncated}{Stopped}{Regenerated}",
+            conversation.ConversationId, aiProvider.Name, totalTokens, turn.ContextFileCount,
+            truncated ? " (truncated)" : "", stopped ? " (stopped by user)" : "", turn.ExistingUserMessage is null ? "" : " (regenerated)");
+
+        return (userMessage, assistantMessage);
     }
 
     /// <summary>

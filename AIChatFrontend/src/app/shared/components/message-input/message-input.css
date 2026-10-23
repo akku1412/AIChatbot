@@ -146,3 +146,21 @@ textarea::placeholder {
     flex: 1 1 100%;
   }
 }
+
+/* While a reply streams the send button is a Stop button: solid, clearly clickable. */
+.send.stop-button {
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: none;
+}
+
+.send.stop-button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.send.stop-button:disabled {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  cursor: progress;
+}

@@ -46,11 +46,25 @@
             {{ store.messagesLoading() ? 'Loading…' : 'Load earlier messages' }}
           </button>
         }
-        @for (message of store.messages(); track message.messageId) {
-          <app-chat-message [message]="message" [conversationTitle]="store.activeConversation()?.title ?? ''" />
+        @for (message of store.messages(); track message.messageId; let last = $last) {
+          @if (message.messageId !== store.streamingMessageId() || message.content) {
+            <app-chat-message
+              [message]="message"
+              [conversationTitle]="store.activeConversation()?.title ?? ''"
+              [streaming]="message.messageId === store.streamingMessageId()"
+              [canRegenerate]="last && message.role === 'assistant' && !store.sending()"
+              (regenerate)="regenerate()"
+            />
+          }
         }
-        @if (store.sending()) {
+        @if (store.waitingForFirstToken()) {
           <app-typing-indicator [label]="store.sendingWithFiles() ? 'Reading your documents…' : ''" />
+        }
+        @if (unansweredQuestion()) {
+          <div class="unanswered">
+            <span>No reply yet.</span>
+            <button type="button" class="link" (click)="regenerate()">Generate reply</button>
+          </div>
         }
       }
     </div>
@@ -61,8 +75,10 @@
       <app-message-input
         [(text)]="draft"
         [busy]="store.sending()"
+        [stopping]="store.stopping()"
         [disabled]="!!store.messagesError()"
         (send)="send($event)"
+        (stop)="store.stopGeneration()"
       />
     </div>
   </div>

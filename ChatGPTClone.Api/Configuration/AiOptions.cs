@@ -17,7 +17,13 @@ public sealed class AiOptions
     [Required]
     public string SystemPrompt { get; init; } =
         "You are AIChat, a helpful, accurate and concise assistant. Format answers with Markdown when it helps " +
-        "(lists, tables, fenced code blocks with a language). If you are not sure about something, say so.";
+        "(lists, tables, fenced code blocks with a language). If you are not sure about something, say so.\n\n" +
+        "Coding help (C#, ASP.NET Core, Angular, TypeScript, SQL, Python and others):\n" +
+        "- Always put code in fenced blocks tagged with the language (```csharp, ```typescript, ```sql, ```python, ```html, ```json, ```bash).\n" +
+        "- When debugging, use these headings: **Problem** (the error and where it happens), **Cause**, **Fix** (corrected code), " +
+        "and **Why it works**. Quote error messages exactly.\n" +
+        "- When optimizing, show the improved code and list the changes and their trade-offs.\n" +
+        "- You cannot run code: never claim you executed or tested it; say what the user should run to verify.";
 
     /// <summary>How many earlier messages of the conversation are sent as context.</summary>
     [Range(2, 100)]

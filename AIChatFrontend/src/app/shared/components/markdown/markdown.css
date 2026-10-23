@@ -135,3 +135,97 @@
 .markdown pre code {
   white-space: pre;
 }
+
+/* Syntax highlighting (highlight.js token classes). Code blocks are always dark, in both themes. */
+.markdown .hljs-comment,
+.markdown .hljs-quote {
+  color: #8b949e;
+  font-style: italic;
+}
+
+.markdown .hljs-keyword,
+.markdown .hljs-selector-tag,
+.markdown .hljs-meta .hljs-keyword,
+.markdown .hljs-doctag {
+  color: #ff7b72;
+}
+
+.markdown .hljs-string,
+.markdown .hljs-regexp,
+.markdown .hljs-addition,
+.markdown .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+
+.markdown .hljs-number,
+.markdown .hljs-literal,
+.markdown .hljs-variable.language_,
+.markdown .hljs-symbol,
+.markdown .hljs-bullet {
+  color: #79c0ff;
+}
+
+.markdown .hljs-title,
+.markdown .hljs-title.function_,
+.markdown .hljs-section {
+  color: #d2a8ff;
+}
+
+.markdown .hljs-title.class_,
+.markdown .hljs-type,
+.markdown .hljs-built_in,
+.markdown .hljs-selector-class,
+.markdown .hljs-selector-id {
+  color: #ffa657;
+}
+
+.markdown .hljs-attr,
+.markdown .hljs-attribute,
+.markdown .hljs-property,
+.markdown .hljs-name,
+.markdown .hljs-tag {
+  color: #7ee787;
+}
+
+.markdown .hljs-meta,
+.markdown .hljs-params,
+.markdown .hljs-subst {
+  color: #e6e6ea;
+}
+
+.markdown .hljs-deletion {
+  color: #ffa198;
+}
+
+.markdown .hljs-emphasis {
+  font-style: italic;
+}
+
+.markdown .hljs-strong {
+  font-weight: 700;
+}
+
+/* Blinking caret at the end of a reply that is still streaming. */
+.markdown.streaming > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown.streaming > :last-child::after {
+    animation: none;
+  }
+}

@@ -36,5 +36,8 @@ public interface IMessageRepository
     Task<List<Guid>> GetRecentAttachmentFileIdsAsync(int conversationId, int take, CancellationToken cancellationToken);
 
     void Add(Message message);
+
+    /// <summary>Deletes one message right away (used to replace a regenerated reply).</summary>
+    Task DeleteAsync(long messageId, CancellationToken cancellationToken);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

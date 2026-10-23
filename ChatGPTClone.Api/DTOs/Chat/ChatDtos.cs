@@ -27,6 +27,18 @@ public sealed record MessagePageDto(IReadOnlyList<MessageDto> Items, bool HasMor
 
 public sealed record SendMessageResponse(MessageDto UserMessage, MessageDto AssistantMessage, ConversationDto Conversation);
 
+/// <summary>
+/// The final "done" event of a streamed reply. AssistantMessage is null when generation was stopped before any text;
+/// ReplacedMessageId is the previous reply removed by a regeneration.
+/// </summary>
+public sealed record StreamTurnResult(
+    MessageDto UserMessage,
+    MessageDto? AssistantMessage,
+    ConversationDto Conversation,
+    bool Stopped,
+    bool Truncated,
+    long? ReplacedMessageId);
+
 // ----- Requests -----
 
 public sealed class ListConversationsQuery

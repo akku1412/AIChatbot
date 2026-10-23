@@ -1,7 +1,58 @@
 import { Component, ViewEncapsulation, computed, inject, input } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import DOMPurify from 'dompurify';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import cpp from 'highlight.js/lib/languages/cpp';
+import csharp from 'highlight.js/lib/languages/csharp';
+import css from 'highlight.js/lib/languages/css';
+import go from 'highlight.js/lib/languages/go';
+import java from 'highlight.js/lib/languages/java';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import markdownLang from 'highlight.js/lib/languages/markdown';
+import powershell from 'highlight.js/lib/languages/powershell';
+import python from 'highlight.js/lib/languages/python';
+import scss from 'highlight.js/lib/languages/scss';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import { Marked, Tokens } from 'marked';
+
+// Only the languages people ask about most, to keep the bundle small (highlight.js core + 16 grammars).
+hljs.registerLanguage('csharp', csharp);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('xml', xml); // also html
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('scss', scss);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('powershell', powershell);
+hljs.registerLanguage('yaml', yaml);
+hljs.registerLanguage('java', java);
+hljs.registerLanguage('cpp', cpp);
+hljs.registerLanguage('go', go);
+hljs.registerLanguage('markdown', markdownLang);
+
+/**
+ * Highlighted HTML for a code block. highlight.js escapes the code itself and only adds <span class="hljs-…">;
+ * the whole reply still goes through DOMPurify afterwards. Unknown or missing languages are just escaped.
+ */
+function highlight(code: string, lang: string): string {
+  const language = lang && hljs.getLanguage(lang) ? lang : null;
+  if (!language) {
+    return escapeHtml(code);
+  }
+  try {
+    return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+  } catch {
+    return escapeHtml(code);
+  }
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -20,7 +71,7 @@ const markdown = new Marked({
     html(token: Tokens.HTML | Tokens.Tag): string {
       return escapeHtml(token.text);
     },
-    // Fenced code: language label + Copy button (handled by click delegation below).
+    // Fenced code: language label + Copy button (handled by click delegation below) + syntax highlighting.
     code(token: Tokens.Code): string {
       const lang = (token.lang ?? '').trim().split(/\s+/)[0]?.replace(/[^\w+#.-]/g, '') ?? '';
       const label = lang || 'code';
@@ -28,7 +79,7 @@ const markdown = new Marked({
         `<div class="code-block">` +
         `<div class="code-header"><span>${escapeHtml(label)}</span>` +
         `<button type="button" class="copy-code" data-copy-code>Copy</button></div>` +
-        `<pre><code${lang ? ` class="language-${escapeHtml(lang)}"` : ''}>${escapeHtml(token.text)}</code></pre>` +
+        `<pre><code class="hljs${lang ? ` language-${escapeHtml(lang)}` : ''}">${highlight(token.text, lang)}</code></pre>` +
         `</div>`
       );
     },
@@ -58,7 +109,7 @@ const PURIFY_CONFIG = {
 @Component({
   selector: 'app-markdown',
   template: '',
-  host: { class: 'markdown', '[innerHTML]': 'html()', '(click)': 'onClick($event)' },
+  host: { class: 'markdown', '[class.streaming]': 'streaming()', '[innerHTML]': 'html()', '(click)': 'onClick($event)' },
   encapsulation: ViewEncapsulation.None,
   styleUrl: './markdown.css',
 })
@@ -66,6 +117,8 @@ export class MarkdownView {
   private readonly sanitizer = inject(DomSanitizer);
 
   readonly content = input.required<string>();
+  /** The reply is still arriving: shows a blinking caret after the text. */
+  readonly streaming = input(false);
 
   protected readonly html = computed<SafeHtml>(() => {
     const rendered = markdown.parse(this.content(), { async: false });

@@ -79,5 +79,19 @@ export interface SendMessageResponse {
   conversation: ConversationSummary;
 }
 
+/** The "done" event of a streamed reply (POST …/messages/stream and …/regenerate). */
+export interface StreamTurnResult {
+  userMessage: ChatMessage;
+  /** Null when generation was stopped before any text. */
+  assistantMessage: ChatMessage | null;
+  conversation: ConversationSummary;
+  stopped: boolean;
+  truncated: boolean;
+  /** The previous reply that a regeneration replaced. */
+  replacedMessageId: number | null;
+}
+
+export type ChatStreamEvent = { type: 'delta'; text: string } | { type: 'done'; result: StreamTurnResult };
+
 /** Longest message the UI and API accept. */
 export const MAX_MESSAGE_LENGTH = 8000;

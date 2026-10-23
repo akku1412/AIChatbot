@@ -154,6 +154,51 @@ public sealed class FakeAiProvider : IAiChatProvider
         var lastUser = messages.Last(m => m.Role == MessageRole.User).Content;
         return Task.FromResult(new AiCompletion($"**Echo:** {lastUser}", 42, false));
     }
+
+    // ----- Streaming controls (reset by ResetStreaming) -----
+
+    /// <summary>After this many pieces the stream waits until cancelled (simulates a long reply for Stop tests).</summary>
+    public int? HoldAfterPieces { get; set; }
+
+    /// <summary>Completes when the stream has sent HoldAfterPieces pieces and is waiting.</summary>
+    public TaskCompletionSource Holding { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Throw this failure after this many pieces (simulates the provider failing mid-reply).</summary>
+    public (int AfterPieces, AiFailureKind Kind)? FailMidStream { get; set; }
+
+    public int StreamCalls;
+
+    public void ResetStreaming()
+    {
+        HoldAfterPieces = null;
+        FailMidStream = null;
+        FailWith = null;
+        Holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    /// <summary>Streams the echo reply word by word.</summary>
+    public async IAsyncEnumerable<AiStreamUpdate> StreamAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref StreamCalls);
+        var full = (await CompleteAsync(messages, maxOutputTokens, cancellationToken)).Content;
+        var pieces = System.Text.RegularExpressions.Regex.Split(full, @"(?<= )");
+        for (var i = 0; i < pieces.Length; i++)
+        {
+            if (FailMidStream is { } fail && i == fail.AfterPieces)
+            {
+                throw new AiProviderException(fail.Kind, "simulated mid-stream failure");
+            }
+            if (HoldAfterPieces == i)
+            {
+                Holding.TrySetResult();
+                await Task.Delay(Timeout.Infinite, cancellationToken); // until Stop / disconnect
+            }
+            await Task.Yield();
+            yield return new AiStreamUpdate(pieces[i]);
+        }
+        yield return new AiStreamUpdate("", 42, false);
+    }
 }
 
 /// <summary>Signs users in through the real endpoints.</summary>

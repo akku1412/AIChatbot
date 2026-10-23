@@ -1,4 +1,4 @@
-import { Component, ElementRef, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 
 import { AuthService } from '../../core/auth/auth.service';
@@ -78,14 +78,31 @@ export class ChatThread {
       });
     });
 
-    // Keep the newest message in view.
+    // Keep the newest message in view — but while a reply streams, only if the user hasn't scrolled up to read.
     effect(() => {
       this.store.messages();
-      this.store.sending();
+      const streaming = this.store.streamingMessageId() !== null;
       setTimeout(() => {
         const el = this.scroller()?.nativeElement;
-        el?.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        if (!el) {
+          return;
+        }
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+        if (!streaming || nearBottom) {
+          el.scrollTo({ top: el.scrollHeight, behavior: streaming ? 'auto' : 'smooth' });
+        }
       });
+    });
+  }
+
+  /** The last message is a question without a reply (generation was stopped before any text). */
+  protected readonly unansweredQuestion = computed(
+    () => !this.store.sending() && this.store.messages().at(-1)?.role === 'user' && (this.store.messages().at(-1)?.messageId ?? 0) > 0,
+  );
+
+  protected regenerate(): void {
+    this.store.regenerate().subscribe({
+      error: (err: unknown) => this.notifications.error(`Couldn't regenerate the reply. ${errorMessage(err)}`),
     });
   }
 

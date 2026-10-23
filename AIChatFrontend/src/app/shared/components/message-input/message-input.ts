@@ -62,10 +62,13 @@ export class MessageInput {
   /** Two-way bound draft text, so the parent can restore it after a failed send. */
   readonly text = model('');
   readonly disabled = input(false);
-  /** True while a reply is being generated: typing is allowed, sending is not. */
+  /** True while a reply is being generated: typing is allowed, sending is not; the send button becomes Stop. */
   readonly busy = input(false);
+  /** Stop was pressed and the server is finishing up. */
+  readonly stopping = input(false);
   readonly placeholder = input('Message AIChat');
   readonly send = output<ComposerSubmit>();
+  readonly stop = output<void>();
 
   protected readonly maxLength = MAX_MESSAGE_LENGTH;
   protected readonly attachments = signal<PendingAttachment[]>([]);

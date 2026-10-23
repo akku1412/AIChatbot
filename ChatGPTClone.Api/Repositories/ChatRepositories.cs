@@ -96,5 +96,8 @@ public sealed class MessageRepository(AppDbContext db) : IMessageRepository
 
     public void Add(Message message) => db.Messages.Add(message);
 
+    public Task DeleteAsync(long messageId, CancellationToken cancellationToken) =>
+        db.Messages.Where(m => m.MessageId == messageId).ExecuteDeleteAsync(cancellationToken);
+
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
 }

@@ -43,7 +43,15 @@
       (keydown)="onKeydown($event)"
     ></textarea>
 
-    <button type="submit" class="send" [disabled]="!canSend()" [attr.aria-label]="busy() ? 'Sending' : 'Send message'">
+    <button
+      type="button"
+      class="send"
+      [class.stop-button]="busy()"
+      [disabled]="busy() ? stopping() : !canSend()"
+      [attr.aria-label]="busy() ? (stopping() ? 'Stopping' : 'Stop generating') : 'Send message'"
+      [title]="busy() ? 'Stop generating' : 'Send message'"
+      (click)="busy() ? stop.emit() : submit()"
+    >
       @if (busy()) {
         <span class="stop" aria-hidden="true"></span>
       } @else {

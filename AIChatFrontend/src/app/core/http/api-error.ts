@@ -39,19 +39,19 @@ export function errorMessage(error: unknown): string {
 }
 
 /**
- * File downloads use responseType 'blob', so a failure's ProblemDetails arrives as a Blob too.
- * This operator parses it back into JSON, so errorMessage() shows the server's explanation.
+ * File downloads use responseType 'blob' (and streams 'text'), so a failure's ProblemDetails arrives as a Blob
+ * or a string too. This operator parses it back into JSON, so errorMessage() shows the server's explanation.
  */
 export function readBlobErrors<T>(): MonoTypeOperatorFunction<T> {
   return catchError((error: unknown) => from(withJsonErrorBody(error)).pipe(switchMap((e) => throwError(() => e))));
 }
 
 async function withJsonErrorBody(error: unknown): Promise<unknown> {
-  if (!(error instanceof HttpErrorResponse) || !(error.error instanceof Blob)) {
+  if (!(error instanceof HttpErrorResponse) || !(error.error instanceof Blob || typeof error.error === 'string')) {
     return error;
   }
   try {
-    const body: unknown = JSON.parse(await blobText(error.error));
+    const body: unknown = JSON.parse(typeof error.error === 'string' ? error.error : await blobText(error.error));
     return new HttpErrorResponse({
       error: body,
       status: error.status,

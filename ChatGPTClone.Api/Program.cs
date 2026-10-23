@@ -120,6 +120,7 @@ builder.Services.AddScoped<IConversationRepository, ConversationRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddSingleton<IGenerationRegistry, GenerationRegistry>();
 builder.Services.AddScoped<IConversationExportService, ConversationExportService>();
 builder.Services.AddScoped<IResponseExportService, ResponseExportService>();
 

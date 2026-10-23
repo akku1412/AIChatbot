@@ -1,8 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, finalize, map, of, switchMap, tap } from 'rxjs';
+import { EMPTY, Observable, finalize, map, of, switchMap, tap } from 'rxjs';
 
 import { errorMessage } from '../http/api-error';
-import { AttachmentInfo, ChatMessage, ConversationSummary } from '../models/chat.models';
+import { AttachmentInfo, ChatMessage, ChatStreamEvent, ConversationSummary, StreamTurnResult } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
 
 const PAGE_SIZE = 20;
@@ -32,6 +32,17 @@ export class ChatStore {
   readonly sending = signal(false);
   /** True while the message being sent carries files (the reply takes longer: documents are read first). */
   readonly sendingWithFiles = signal(false);
+  /** The temporary id of the reply that is streaming in right now. */
+  readonly streamingMessageId = signal<number | null>(null);
+  /** Stop was pressed; waiting for the server to finish saving the partial reply. */
+  readonly stopping = signal(false);
+  /** True until the first piece of the streaming reply arrives (shows the typing indicator). */
+  readonly waitingForFirstToken = computed(() => {
+    const id = this.streamingMessageId();
+    return id !== null && !this.messages().find((m) => m.messageId === id)?.content;
+  });
+
+  private activeStream: { abort: () => void } | null = null;
 
   readonly activeConversation = computed(
     () => this.conversationList().find((c) => c.conversationId === this.activeConversationId()) ?? null,
@@ -119,23 +130,15 @@ export class ChatStore {
   }
 
   /**
-   * Sends a message, creating the conversation first when this is a new chat.
-   * Emits the conversation id so the caller can update the URL. The user's message is shown
+   * Sends a message, creating the conversation first when this is a new chat, and streams the reply into the
+   * thread. Emits the conversation id once the reply is saved (also when stopped). The user's message shows
    * immediately; on failure it is removed again and the error propagates to the caller.
    */
   send(content: string, attachments: AttachmentInfo[] = []): Observable<number> {
-    const optimistic: ChatMessage = {
-      messageId: this.nextTempId--,
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString(),
-      tokenUsage: null,
-      attachments,
-    };
-    this.messages.update((list) => [...list, optimistic]);
-    this.messagesError.set(null);
-    this.sending.set(true);
-    this.sendingWithFiles.set(attachments.length > 0);
+    const question = this.tempMessage('user', content, attachments);
+    const reply = this.tempMessage('assistant', '');
+    this.messages.update((list) => [...list, question, reply]);
+    this.beginStreaming(reply.messageId, attachments.length > 0);
 
     const existingId = this.activeConversationId();
     let createdId: number | null = null;
@@ -152,34 +155,161 @@ export class ChatStore {
 
     return conversationId$.pipe(
       switchMap((conversationId) =>
-        this.api.sendMessage(conversationId, content, attachments.map((a) => a.fileId)).pipe(
-          tap((response) => {
-            if (this.activeConversationId() === conversationId) {
-              this.messages.update((list) => [
-                ...list.filter((m) => m.messageId !== optimistic.messageId),
-                response.userMessage,
-                response.assistantMessage,
-              ]);
-            }
-            // Move the conversation to the top with its (possibly generated) title.
-            this.conversationList.update((list) => [
-              response.conversation,
-              ...list.filter((c) => c.conversationId !== conversationId),
-            ]);
-          }),
-          map(() => conversationId),
+        this.consumeStream(
+          conversationId,
+          this.api.streamMessage(conversationId, content, attachments.map((a) => a.fileId)),
+          { questionTempId: question.messageId, replyTempId: reply.messageId, replaced: null },
         ),
       ),
       tap({
         error: () => {
-          this.messages.update((list) => list.filter((m) => m.messageId !== optimistic.messageId));
+          this.messages.update((list) => list.filter((m) => m.messageId !== question.messageId && m.messageId !== reply.messageId));
           if (createdId !== null) {
             this.discardEmptyConversation(createdId);
           }
         },
       }),
-      finalize(() => this.sending.set(false)),
+      finalize(() => this.endStreaming()),
     );
+  }
+
+  /**
+   * Streams a new answer to the last question. The old reply disappears while the new one streams and comes
+   * back if regeneration fails or is stopped before any text.
+   */
+  regenerate(): Observable<number> {
+    const conversationId = this.activeConversationId();
+    if (!conversationId || this.sending()) {
+      return EMPTY;
+    }
+    const last = this.messages().at(-1);
+    const replaced = last?.role === 'assistant' ? last : null;
+    const reply = this.tempMessage('assistant', '');
+    this.messages.update((list) => [...list.filter((m) => m !== replaced), reply]);
+    this.beginStreaming(reply.messageId, false);
+
+    return this.consumeStream(conversationId, this.api.regenerate(conversationId), {
+      questionTempId: null,
+      replyTempId: reply.messageId,
+      replaced,
+    }).pipe(
+      tap({
+        error: () =>
+          this.messages.update((list) => [...list.filter((m) => m.messageId !== reply.messageId), ...(replaced ? [replaced] : [])]),
+      }),
+      finalize(() => this.endStreaming()),
+    );
+  }
+
+  /**
+   * Stop generating: the server ends the stream with a "done" (stopped) event and keeps the partial reply.
+   * If no such event arrives (e.g. the reply ran on another server instance), the stream is closed from here,
+   * which also stops and saves it on the server, and the thread is reloaded.
+   */
+  stopGeneration(): void {
+    const conversationId = this.activeConversationId();
+    if (!conversationId || !this.sending()) {
+      return;
+    }
+    this.stopping.set(true);
+    this.api.stopGeneration(conversationId).subscribe({ error: () => undefined });
+    setTimeout(() => {
+      if (this.sending() && this.stopping() && this.activeStream) {
+        this.activeStream.abort();
+      }
+    }, 8000);
+  }
+
+  private consumeStream(
+    conversationId: number,
+    events: Observable<ChatStreamEvent>,
+    temp: { questionTempId: number | null; replyTempId: number; replaced: ChatMessage | null },
+  ): Observable<number> {
+    return new Observable<number>((subscriber) => {
+      const subscription = events.subscribe({
+        next: (event) => {
+          if (event.type === 'delta') {
+            this.messages.update((list) =>
+              list.map((m) => (m.messageId === temp.replyTempId ? { ...m, content: m.content + event.text } : m)),
+            );
+            return;
+          }
+          this.applyResult(conversationId, event.result, temp);
+          subscriber.next(conversationId);
+        },
+        error: (err: unknown) => subscriber.error(err),
+        complete: () => subscriber.complete(),
+      });
+
+      this.activeStream = {
+        // Closing the stream stops generation on the server too; reload to show what it saved.
+        abort: () => {
+          subscription.unsubscribe();
+          this.endStreaming();
+          this.reloadMessages(conversationId);
+          subscriber.complete();
+        },
+      };
+      return () => subscription.unsubscribe();
+    });
+  }
+
+  /** Swaps the temporary messages for the saved ones from the "done" event. */
+  private applyResult(
+    conversationId: number,
+    result: StreamTurnResult,
+    temp: { questionTempId: number | null; replyTempId: number; replaced: ChatMessage | null },
+  ): void {
+    if (this.activeConversationId() === conversationId) {
+      this.messages.update((list) => {
+        const kept = list.filter(
+          (m) => m.messageId !== temp.questionTempId && m.messageId !== temp.replyTempId && m.messageId !== result.replacedMessageId,
+        );
+        const added: ChatMessage[] = [];
+        if (temp.questionTempId !== null) {
+          added.push(result.userMessage);
+        }
+        if (result.assistantMessage) {
+          added.push(result.assistantMessage);
+        } else if (temp.replaced) {
+          added.push(temp.replaced); // stopped before any text: the old reply stays
+        }
+        return [...kept, ...added];
+      });
+    }
+    // Move the conversation to the top with its (possibly generated) title.
+    this.conversationList.update((list) => [result.conversation, ...list.filter((c) => c.conversationId !== conversationId)]);
+  }
+
+  private reloadMessages(conversationId: number): void {
+    this.api.getMessages(conversationId).subscribe({
+      next: (page) => {
+        if (this.activeConversationId() === conversationId) {
+          this.messages.set(page.items);
+          this.hasOlderMessages.set(page.hasMore);
+        }
+      },
+      error: () => undefined,
+    });
+  }
+
+  private tempMessage(role: ChatMessage['role'], content: string, attachments: AttachmentInfo[] = []): ChatMessage {
+    return { messageId: this.nextTempId--, role, content, createdAt: new Date().toISOString(), tokenUsage: null, attachments };
+  }
+
+  private beginStreaming(replyTempId: number, withFiles: boolean): void {
+    this.messagesError.set(null);
+    this.sending.set(true);
+    this.stopping.set(false);
+    this.sendingWithFiles.set(withFiles);
+    this.streamingMessageId.set(replyTempId);
+  }
+
+  private endStreaming(): void {
+    this.sending.set(false);
+    this.stopping.set(false);
+    this.streamingMessageId.set(null);
+    this.activeStream = null;
   }
 
   renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {

@@ -75,6 +75,27 @@ describe('MessageInput', () => {
     expect(sent).toEqual([]);
   });
 
+  it('while busy, the button stops generation but Enter does not', () => {
+    const stops: number[] = [];
+    fixture.componentInstance.stop.subscribe(() => stops.push(1));
+    fixture.componentRef.setInput('busy', true);
+    type('next question');
+    fixture.detectChanges();
+
+    press({});
+    expect(stops).toEqual([]);
+    expect(sent).toEqual([]);
+
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector('button.send');
+    expect(button.getAttribute('aria-label')).toBe('Stop generating');
+    button.click();
+    expect(stops).toEqual([1]);
+
+    fixture.componentRef.setInput('stopping', true);
+    fixture.detectChanges();
+    expect(button.disabled).toBe(true);
+  });
+
   it('rejects unsupported files without uploading them', () => {
     pick(new File(['x'], 'notes.rtf', { type: 'application/rtf' }));
     http.expectNone((req) => req.url.endsWith('/files/upload'));

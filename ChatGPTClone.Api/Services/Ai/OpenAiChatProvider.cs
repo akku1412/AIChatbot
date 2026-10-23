@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.Runtime.CompilerServices;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Models;
@@ -49,22 +50,13 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     public async Task<AiCompletion> CompleteAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
         CancellationToken cancellationToken)
     {
-        if (_client is null)
-        {
-            throw new AiProviderException(AiFailureKind.NotConfigured, $"{Name} API key is not configured.");
-        }
-
-        var chatMessages = messages.Select<AiChatMessage, ChatMessage>(m => m.Role switch
-        {
-            MessageRole.System => new SystemChatMessage(m.Content),
-            MessageRole.Assistant => new AssistantChatMessage(m.Content),
-            _ => new UserChatMessage(m.Content),
-        }).ToList();
+        var client = RequireClient();
+        var chatMessages = ToChatMessages(messages);
 
         ChatCompletion completion;
         try
         {
-            completion = await _client.CompleteChatAsync(
+            completion = await client.CompleteChatAsync(
                 chatMessages,
                 new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = _reasoningEffort },
                 cancellationToken);
@@ -96,6 +88,85 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         return new AiCompletion(text.Trim(), completion.Usage?.TotalTokenCount,
             completion.FinishReason == ChatFinishReason.Length);
     }
+
+    /// <summary>
+    /// Streams the reply token by token (server-sent chunks from the provider). Failures are translated exactly
+    /// like CompleteAsync, including ones that happen part-way through. Cancelling stops the provider request.
+    /// </summary>
+    public async IAsyncEnumerable<AiStreamUpdate> StreamAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var client = RequireClient();
+        var options = new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = _reasoningEffort };
+        var updates = client.CompleteChatStreamingAsync(ToChatMessages(messages), options, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+
+        int? totalTokens = null;
+        var truncated = false;
+        var anyText = false;
+        try
+        {
+            while (true)
+            {
+                StreamingChatCompletionUpdate update;
+                try
+                {
+                    if (!await updates.MoveNextAsync())
+                    {
+                        break;
+                    }
+                    update = updates.Current;
+                }
+                catch (ClientResultException ex)
+                {
+                    throw Translate(ex);
+                }
+                catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new AiProviderException(AiFailureKind.Timeout, $"{Name} did not respond in time.", ex);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException)
+                {
+                    throw new AiProviderException(AiFailureKind.Unavailable, $"Lost the connection to {Name}.", ex);
+                }
+
+                if (update.FinishReason == ChatFinishReason.ContentFilter)
+                {
+                    throw new AiProviderException(AiFailureKind.ContentRejected, $"{Name} content filter blocked the reply.");
+                }
+                truncated |= update.FinishReason == ChatFinishReason.Length;
+                totalTokens = update.Usage?.TotalTokenCount ?? totalTokens;
+
+                var text = string.Concat(update.ContentUpdate.Where(p => p.Kind == ChatMessageContentPartKind.Text).Select(p => p.Text));
+                if (text.Length > 0)
+                {
+                    anyText = true;
+                    yield return new AiStreamUpdate(text);
+                }
+            }
+        }
+        finally
+        {
+            await updates.DisposeAsync();
+        }
+
+        if (!anyText)
+        {
+            throw new AiProviderException(AiFailureKind.EmptyResponse, $"{Name} returned an empty reply.");
+        }
+        yield return new AiStreamUpdate("", totalTokens, truncated);
+    }
+
+    private ChatClient RequireClient() =>
+        _client ?? throw new AiProviderException(AiFailureKind.NotConfigured, $"{Name} API key is not configured.");
+
+    private static List<ChatMessage> ToChatMessages(IReadOnlyList<AiChatMessage> messages) =>
+        messages.Select<AiChatMessage, ChatMessage>(m => m.Role switch
+        {
+            MessageRole.System => new SystemChatMessage(m.Content),
+            MessageRole.Assistant => new AssistantChatMessage(m.Content),
+            _ => new UserChatMessage(m.Content),
+        }).ToList();
 
     private AiProviderException Translate(ClientResultException ex)
     {

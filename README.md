@@ -3,8 +3,12 @@
 A ChatGPT-style chat app: **Angular 21** frontend, **ASP.NET Core 8** Web API, **SQL Server**, EF Core, and an
 OpenAI-compatible AI provider (Groq or OpenAI). Sign-in is passwordless: **email one-time code** or **Google**.
 
+**How every feature works** (sign-in, chat, documents, downloads, exports, data, security): see
+[docs/FUNCTIONALITY.md](docs/FUNCTIONALITY.md). This README covers setup and deployment.
+
 ```
 AIChatFrontend/          Angular app (login, code page, chat dashboard, profile)
+docs/                    Functional documentation
 ChatGPTClone.Api/        ASP.NET Core API (auth, conversations, chat, users)
 ChatGPTClone.Api.Tests/  xUnit unit + integration tests
 database/                Generated SQL schema script
@@ -98,7 +102,7 @@ cd AIChatFrontend;    npm start                             # http://localhost:4
 ### 6. Tests
 
 ```powershell
-dotnet test ChatGPTClone.Api.Tests      # 153 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
+dotnet test ChatGPTClone.Api.Tests      # 165 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
 cd AIChatFrontend; npx ng test --watch=false
 ```
 
@@ -121,6 +125,9 @@ limiting, ownership checks) is real. Set `CHATGPTCLONE_TEST_DB` to use another S
 | GET/PUT/DELETE | `/api/conversations/{id}` | JWT | get / rename `{ "title" }` / delete |
 | GET | `/api/conversations/{id}/export` | JWT | the whole conversation as a UTF-8 `.txt` download (owner only) |
 | GET/POST | `/api/chat/{id}/messages` | JWT | list (`?limit&before`) / send `{ "content", "attachmentIds" }` |
+| POST | `/api/chat/{id}/messages/stream` | JWT | same body; reply streamed as Server-Sent Events: `delta` `{text}` … then `done` (saved messages) or `error` |
+| POST | `/api/chat/{id}/messages/regenerate` | JWT | stream a new answer to the last question (replaces the last reply) |
+| POST | `/api/chat/{id}/messages/stop` | JWT | stop the running reply (204; the partial reply is saved) · 404 if nothing is running |
 | POST | `/api/files/upload` | JWT | `multipart/form-data`, field `file` → extracted, returns the file record |
 | GET | `/api/files/limits` | JWT | max size, max files per message, allowed extensions |
 | GET | `/api/files` · `/api/files/{fileId}` | JWT | your uploads / one upload (owner only, 404 otherwise) |
