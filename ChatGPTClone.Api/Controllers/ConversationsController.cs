@@ -14,13 +14,35 @@ namespace ChatGPTClone.Api.Controllers;
 public sealed class ConversationsController(IConversationService conversations, IConversationExportService exports)
     : ControllerBase
 {
-    /// <summary>Most recently active first, paginated.</summary>
+    /// <summary>
+    /// Not archived: pinned first, then most recently active. With ?archived=true: only archived chats,
+    /// most recently archived first. Paginated.
+    /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<ConversationDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<ConversationDto>>> List([FromQuery] ListConversationsQuery query,
         CancellationToken cancellationToken) =>
-        Ok(await conversations.ListAsync(User.GetUserId(), query.Page, query.PageSize, cancellationToken));
+        Ok(await conversations.ListAsync(User.GetUserId(), query.Page, query.PageSize, query.Archived, cancellationToken));
+
+    /// <summary>
+    /// Chats (archived ones included) whose title or message text contains q (2–100 characters, case-insensitive),
+    /// pinned first, with a snippet around the first match in the newest matching message.
+    /// </summary>
+    [HttpGet("search")]
+    [ProducesResponseType(typeof(IReadOnlyList<ConversationSearchResultDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IReadOnlyList<ConversationSearchResultDto>>> Search([FromQuery] SearchConversationsQuery query,
+        CancellationToken cancellationToken) =>
+        Ok(await conversations.SearchAsync(User.GetUserId(), query.Q, query.Limit, cancellationToken));
+
+    /// <summary>Partial update — any of { "title", "isPinned", "archived" }.</summary>
+    [HttpPatch("{id:int}")]
+    [ProducesResponseType(typeof(ConversationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ConversationDto>> Patch(int id, PatchConversationRequest request, CancellationToken cancellationToken) =>
+        Ok(await conversations.PatchAsync(User.GetUserId(), id, request, cancellationToken));
 
     [HttpGet("{id:int}")]
     [ProducesResponseType(typeof(ConversationDto), StatusCodes.Status200OK)]

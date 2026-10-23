@@ -27,7 +27,10 @@ public sealed partial class ConversationExportService(
     {
         // Ownership first: someone else's id is a 404, exactly like the other conversation endpoints.
         var conversation = await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
-        var all = await messages.GetAllAsync(conversationId, cancellationToken);
+        // The thread as the user sees it: the active version of every message (not superseded versions).
+        var nodes = await messages.GetNodesAsync(conversationId, cancellationToken);
+        var thread = ConversationTree.ActiveThread(nodes).Select(t => t.Node.MessageId).ToList();
+        var all = await messages.GetByIdsAsync(thread, cancellationToken);
         var shown = all.Where(m => m.Role is MessageRole.User or MessageRole.Assistant).ToList();
         var exportedAt = clock.GetUtcNow().UtcDateTime;
 

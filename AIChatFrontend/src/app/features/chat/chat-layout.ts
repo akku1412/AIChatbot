@@ -11,7 +11,7 @@ import { ChatStore } from '../../core/services/chat.store';
 import { fileNameFromDisposition, safeFileName, saveBlob } from '../../core/services/download';
 import { AppHeader } from '../../shared/components/app-header/app-header';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
-import { RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
+import { ArchiveRequest, PinRequest, RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 
 /** Signed-in shell: sidebar (a drawer on small screens) + header + the routed page (chat or profile). */
@@ -29,6 +29,15 @@ import { NotificationService } from '../../shared/components/toast/notification.
           [error]="store.listError()"
           [hasMore]="store.hasMoreConversations()"
           [user]="auth.user()"
+          [searchResults]="store.searchResults()"
+          [searchLoading]="store.searchLoading()"
+          [searchError]="store.searchError()"
+          [archived]="store.archivedConversations()"
+          [archivedLoading]="store.archivedLoading()"
+          (search)="store.search($event)"
+          (pin)="pin($event)"
+          (archive)="archive($event)"
+          (openArchived)="store.loadArchived()"
           (newChat)="newChat()"
           (selected)="closeDrawer()"
           (closed)="closeDrawer()"
@@ -130,6 +139,20 @@ export class ChatLayout {
     this.store.renameConversation(conversationId, title).subscribe({
       next: () => this.notifications.success('Conversation renamed.'),
       error: (err: unknown) => this.notifications.error(`Couldn't rename: ${errorMessage(err)}`),
+    });
+  }
+
+  protected pin({ conversation, pinned }: PinRequest): void {
+    this.store.setPinned(conversation, pinned).subscribe({
+      next: () => this.notifications.success(pinned ? 'Chat pinned.' : 'Chat unpinned.'),
+      error: (err: unknown) => this.notifications.error(`Couldn't ${pinned ? 'pin' : 'unpin'} the chat: ${errorMessage(err)}`),
+    });
+  }
+
+  protected archive({ conversation, archived }: ArchiveRequest): void {
+    this.store.setArchived(conversation, archived).subscribe({
+      next: () => this.notifications.success(archived ? 'Chat archived. Find it under "Archived chats".' : 'Chat restored.'),
+      error: (err: unknown) => this.notifications.error(`Couldn't ${archived ? 'archive' : 'restore'} the chat: ${errorMessage(err)}`),
     });
   }
 

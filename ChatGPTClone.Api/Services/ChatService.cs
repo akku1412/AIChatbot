@@ -17,29 +17,44 @@ public interface IChatService
     Task<SendMessageResponse> SendAsync(int userId, int conversationId, string? content, IReadOnlyList<Guid>? attachmentIds,
         CancellationToken cancellationToken);
 
+    /// <summary>The conversation a message belongs to; 404 unless it is the user's.</summary>
+    Task<int> GetConversationIdAsync(int userId, long messageId, CancellationToken cancellationToken);
+
     /// <summary>Checks ownership and files, then builds the prompt for a new user message. Nothing is saved yet.</summary>
     Task<ChatTurn> PrepareTurnAsync(int userId, int conversationId, string? content, IReadOnlyList<Guid>? attachmentIds,
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// A new reply to the conversation's last user message. If the conversation ends with an AI reply,
-    /// that reply is replaced once the new one is saved. 409 when there is no user message to answer.
+    /// A new version of an AI reply (<paramref name="messageId"/> = that reply), or a first reply to a question that
+    /// has none (<paramref name="messageId"/> = the question). Older versions are kept and can be switched back to.
     /// </summary>
-    Task<ChatTurn> PrepareRegenerationAsync(int userId, int conversationId, CancellationToken cancellationToken);
+    Task<ChatTurn> PrepareRegenerationAsync(int userId, long messageId, CancellationToken cancellationToken);
+
+    /// <summary>Regenerates the latest reply of the visible thread (or answers a trailing question); 409 when empty.</summary>
+    Task<ChatTurn> PrepareLatestRegenerationAsync(int userId, int conversationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Edit and resend: a new version of the user's message (a sibling with the same parent, keeping its attachments)
+    /// that starts a new branch and gets a new reply. The old branch is kept as an earlier version.
+    /// </summary>
+    Task<ChatTurn> PrepareEditAsync(int userId, long messageId, string content, CancellationToken cancellationToken);
+
+    /// <summary>Shows another version of a message (1-based) and returns the newest page of the resulting thread.</summary>
+    Task<MessagePageDto> SwitchVersionAsync(int userId, long messageId, int versionNumber, CancellationToken cancellationToken);
 
     /// <summary>The AI reply as it is generated; provider failures become ApiExceptions (502/503/504...).</summary>
     IAsyncEnumerable<AiStreamUpdate> StreamReplyAsync(ChatTurn turn, CancellationToken cancellationToken);
 
     /// <summary>
     /// Saves the turn: the user message (unless regenerating) and the reply if it has any text — also when the user
-    /// stopped generation part-way. Generates the conversation title after the first exchange.
+    /// stopped generation part-way (then marked IsTruncated). Generates the conversation title after the first exchange.
     /// </summary>
     Task<StreamTurnResult> SaveTurnAsync(ChatTurn turn, string reply, int? totalTokens, bool stopped, bool truncated,
         CancellationToken cancellationToken);
 }
 
-/// <summary>Everything needed to generate and save one reply. Created by PrepareTurnAsync / PrepareRegenerationAsync.</summary>
-public sealed class ChatTurn
+/// <summary>Everything needed to generate and save one reply. Created by the Prepare… methods.</summary>
+public sealed record ChatTurn
 {
     public required Conversation Conversation { get; init; }
     public required string Text { get; init; }
@@ -48,11 +63,23 @@ public sealed class ChatTurn
     public required bool IsFirstExchange { get; init; }
     public required int ContextFileCount { get; init; }
 
+    /// <summary>Messages from the root to the question's parent: re-activated on save (they may be on another branch).</summary>
+    public required List<MessageNode> AncestorPath { get; init; }
+
+    /// <summary>New question: its parent (the end of the thread, or the edited message's parent) and version number.</summary>
+    public long? ParentMessageId { get; init; }
+    public int UserVersionIndex { get; init; } = 1;
+
     /// <summary>Regeneration: the already-saved question being answered again.</summary>
     public Message? ExistingUserMessage { get; init; }
 
-    /// <summary>Regeneration: the previous reply, deleted when the new one is saved.</summary>
-    public long? ReplacedMessageId { get; init; }
+    /// <summary>Version number the new reply gets among the replies to its question.</summary>
+    public int ReplyVersionIndex { get; init; } = 1;
+
+    /// <summary>The message this turn supersedes on screen: the previous reply (regenerate) or the edited question.</summary>
+    public long? PreviousVersionId { get; init; }
+
+    public string Kind { get; init; } = "send";
 }
 
 public sealed class ChatService(
@@ -92,8 +119,56 @@ public sealed class ChatService(
         CancellationToken cancellationToken)
     {
         await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
-        var (items, hasMore) = await messageRepository.GetPageAsync(conversationId, beforeMessageId, limit, cancellationToken);
-        return new MessagePageDto(items.Select(MessageDto.From).ToList(), hasMore);
+        return await ThreadPageAsync(conversationId, beforeMessageId, limit, cancellationToken);
+    }
+
+    /// <summary>Oldest-first page of the visible thread (ids grow along a thread, so "before" works as before).</summary>
+    private async Task<MessagePageDto> ThreadPageAsync(int conversationId, long? beforeMessageId, int limit,
+        CancellationToken cancellationToken)
+    {
+        var nodes = await messageRepository.GetNodesAsync(conversationId, cancellationToken);
+        var thread = ConversationTree.ActiveThread(nodes)
+            .Where(t => beforeMessageId is not { } before || t.Node.MessageId < before)
+            .ToList();
+        var page = thread.TakeLast(limit).ToList();
+        var messages = await messageRepository.GetByIdsAsync(page.Select(t => t.Node.MessageId).ToList(), cancellationToken);
+        var versions = page.ToDictionary(t => t.Node.MessageId);
+        return new MessagePageDto(
+            messages.Select(m => MessageDto.From(m, versions[m.MessageId].VersionNumber, versions[m.MessageId].VersionCount)).ToList(),
+            thread.Count > page.Count);
+    }
+
+    public async Task<int> GetConversationIdAsync(int userId, long messageId, CancellationToken cancellationToken) =>
+        (await GetOwnedMessageAsync(userId, messageId, cancellationToken)).ConversationId;
+
+    public async Task<MessagePageDto> SwitchVersionAsync(int userId, long messageId, int versionNumber, CancellationToken cancellationToken)
+    {
+        var message = await GetOwnedMessageAsync(userId, messageId, cancellationToken);
+        var nodes = await messageRepository.GetNodesAsync(message.ConversationId, cancellationToken);
+        var siblings = ConversationTree.Siblings(nodes, nodes.Single(n => n.MessageId == messageId));
+        if (versionNumber < 1 || versionNumber > siblings.Count)
+        {
+            throw new ApiException(StatusCodes.Status400BadRequest, "No such version",
+                $"This message has {siblings.Count} version(s).", new Dictionary<string, object?> { ["reason"] = "version_out_of_range" });
+        }
+
+        await ActivatePathAsync(message.ConversationId, ConversationTree.PathTo(nodes, siblings[versionNumber - 1].MessageId), cancellationToken);
+        return await ThreadPageAsync(message.ConversationId, null, 50, cancellationToken);
+    }
+
+    private async Task<Message> GetOwnedMessageAsync(int userId, long messageId, CancellationToken cancellationToken) =>
+        await messageRepository.GetOwnedAsync(messageId, userId, cancellationToken) is { Role: not MessageRole.System } message
+            ? message
+            : throw new ApiException(StatusCodes.Status404NotFound, "Message not found",
+                "This message doesn't exist or has been deleted.", new Dictionary<string, object?> { ["reason"] = "message_not_found" });
+
+    /// <summary>Makes every message on the path the active version among its siblings, so the thread shows it.</summary>
+    private async Task ActivatePathAsync(int conversationId, IEnumerable<MessageNode> path, CancellationToken cancellationToken)
+    {
+        foreach (var node in path)
+        {
+            await messageRepository.ActivateAsync(conversationId, node.ParentMessageId, node.MessageId, cancellationToken);
+        }
     }
 
     public async Task<SendMessageResponse> SendAsync(int userId, int conversationId, string? content,
@@ -118,40 +193,95 @@ public sealed class ChatService(
         // Attached files must belong to this user and be fully processed.
         var newFiles = await fileService.GetReadyFilesAsync(userId, attachmentIds?.Distinct().ToList() ?? [], cancellationToken);
         var text = string.IsNullOrWhiteSpace(content) ? DefaultFileQuestion : content.Trim();
-        var history = await messageRepository.GetRecentAsync(conversationId, _options.MaxHistoryMessages, cancellationToken);
 
-        return await BuildTurnAsync(userId, conversation, text, newFiles, history, existingUserMessage: null,
-            replacedMessageId: null, cancellationToken);
+        // The new question continues the visible thread.
+        var nodes = await messageRepository.GetNodesAsync(conversationId, cancellationToken);
+        var thread = ConversationTree.ActiveThread(nodes).Select(t => t.Node).ToList();
+        var parentId = thread.LastOrDefault()?.MessageId;
+
+        return await BuildTurnAsync(userId, conversation, text, newFiles, thread, cancellationToken) with
+        {
+            ParentMessageId = parentId,
+            UserVersionIndex = ConversationTree.NextVersionIndex(nodes, parentId),
+        };
     }
 
-    public async Task<ChatTurn> PrepareRegenerationAsync(int userId, int conversationId, CancellationToken cancellationToken)
+    public async Task<ChatTurn> PrepareLatestRegenerationAsync(int userId, int conversationId, CancellationToken cancellationToken)
     {
-        var conversation = await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
-        var recent = await messageRepository.GetRecentAsync(conversationId, _options.MaxHistoryMessages + 2, cancellationToken);
+        await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
+        var nodes = await messageRepository.GetNodesAsync(conversationId, cancellationToken);
+        var last = ConversationTree.ActiveThread(nodes).LastOrDefault()
+            ?? throw new ApiException(StatusCodes.Status409Conflict, "Nothing to regenerate",
+                "This conversation has no messages yet.", new Dictionary<string, object?> { ["reason"] = "nothing_to_regenerate" });
+        return await PrepareRegenerationAsync(userId, last.Node.MessageId, cancellationToken);
+    }
 
-        // The question is the last user message; a reply after it (if any) is the one being replaced.
-        var questionIndex = recent.FindLastIndex(m => m.Role == MessageRole.User);
-        var trailing = recent.Skip(questionIndex + 1).ToList();
-        if (questionIndex < 0 || trailing.Count > 1 || trailing.Any(m => m.Role != MessageRole.Assistant))
-        {
-            throw new ApiException(StatusCodes.Status409Conflict, "Nothing to regenerate",
-                "Only the latest reply can be regenerated.", new Dictionary<string, object?> { ["reason"] = "nothing_to_regenerate" });
-        }
+    public async Task<ChatTurn> PrepareRegenerationAsync(int userId, long messageId, CancellationToken cancellationToken)
+    {
+        var target = await GetOwnedMessageAsync(userId, messageId, cancellationToken);
+        var conversation = await conversations.GetOwnedOrThrowAsync(userId, target.ConversationId, cancellationToken);
+        var nodes = await messageRepository.GetNodesAsync(target.ConversationId, cancellationToken);
+        var targetNode = nodes.Single(n => n.MessageId == messageId);
 
-        var question = recent[questionIndex];
+        // Regenerating a reply answers its question again; "regenerating" a question gives it a (first) reply.
+        var questionNode = targetNode.Role == MessageRole.User
+            ? targetNode
+            : nodes.SingleOrDefault(n => n.MessageId == targetNode.ParentMessageId && n.Role == MessageRole.User)
+              ?? throw new ApiException(StatusCodes.Status409Conflict, "Nothing to regenerate",
+                  "This reply has no question to answer again.", new Dictionary<string, object?> { ["reason"] = "nothing_to_regenerate" });
+        var question = questionNode.MessageId == target.MessageId
+            ? target
+            : (await messageRepository.GetByIdsAsync([questionNode.MessageId], cancellationToken)).Single();
+
         // Files that were deleted since are simply no longer attached (their links are removed with them).
         var files = await fileService.GetReadyFilesAsync(userId, question.Attachments.Select(a => a.FileId).ToList(), cancellationToken);
+        var history = ConversationTree.PathTo(nodes, questionNode.MessageId).SkipLast(1).ToList();
+        var currentReply = nodes.Where(n => n.ParentMessageId == questionNode.MessageId)
+            .OrderBy(n => n.MessageId).LastOrDefault(n => n.IsActive);
 
-        return await BuildTurnAsync(userId, conversation, question.Content, files, recent.Take(questionIndex).ToList(),
-            existingUserMessage: question, replacedMessageId: trailing.FirstOrDefault()?.MessageId, cancellationToken);
+        return await BuildTurnAsync(userId, conversation, question.Content, files, history, cancellationToken) with
+        {
+            ExistingUserMessage = question,
+            ReplyVersionIndex = ConversationTree.NextVersionIndex(nodes, questionNode.MessageId),
+            PreviousVersionId = currentReply?.MessageId,
+            Kind = "regenerate",
+        };
     }
 
-    private async Task<ChatTurn> BuildTurnAsync(int userId, Conversation conversation, string text, List<UploadedFile> newFiles,
-        List<Message> history, Message? existingUserMessage, long? replacedMessageId, CancellationToken cancellationToken)
+    public async Task<ChatTurn> PrepareEditAsync(int userId, long messageId, string content, CancellationToken cancellationToken)
     {
-        // Files attached now, plus files attached earlier in this conversation (for follow-up questions).
+        var original = await GetOwnedMessageAsync(userId, messageId, cancellationToken);
+        if (original.Role != MessageRole.User)
+        {
+            throw new ApiException(StatusCodes.Status409Conflict, "Can't edit this message",
+                "Only your own messages can be edited.", new Dictionary<string, object?> { ["reason"] = "not_editable" });
+        }
+        var conversation = await conversations.GetOwnedOrThrowAsync(userId, original.ConversationId, cancellationToken);
+        var nodes = await messageRepository.GetNodesAsync(original.ConversationId, cancellationToken);
+
+        // The edited question keeps the original's attachments (those still available).
+        var files = await fileService.GetReadyFilesAsync(userId, original.Attachments.Select(a => a.FileId).ToList(), cancellationToken);
+        var history = ConversationTree.PathTo(nodes, original.MessageId).SkipLast(1).ToList();
+
+        return await BuildTurnAsync(userId, conversation, content.Trim(), files, history, cancellationToken) with
+        {
+            ParentMessageId = original.ParentMessageId,
+            UserVersionIndex = ConversationTree.NextVersionIndex(nodes, original.ParentMessageId),
+            PreviousVersionId = original.MessageId,
+            Kind = "edit",
+        };
+    }
+
+    /// <summary>Builds the prompt from the thread before the question (<paramref name="historyPath"/>, root first).</summary>
+    private async Task<ChatTurn> BuildTurnAsync(int userId, Conversation conversation, string text, List<UploadedFile> newFiles,
+        List<MessageNode> historyPath, CancellationToken cancellationToken)
+    {
+        var recentIds = historyPath.TakeLast(_options.MaxHistoryMessages).Select(n => n.MessageId).ToList();
+        var history = await messageRepository.GetByIdsAsync(recentIds, cancellationToken);
+
+        // Files attached now, plus files attached earlier on this thread (for follow-up questions).
         var newIds = newFiles.Select(f => f.FileId).ToHashSet();
-        var earlierIds = (await messageRepository.GetRecentAttachmentFileIdsAsync(conversation.ConversationId,
+        var earlierIds = (await messageRepository.GetAttachmentFileIdsAsync(historyPath.Select(n => n.MessageId).ToList(),
                 _fileOptions.MaxFilesInContext, cancellationToken))
             .Where(id => !newIds.Contains(id))
             .ToList();
@@ -165,10 +295,9 @@ public sealed class ChatService(
             Text = text,
             NewFiles = newFiles,
             Prompt = BuildPrompt(history, WithAttachmentNote(text, newFiles.Select(f => f.OriginalFileName)), documents),
-            IsFirstExchange = history.Count == 0,
+            IsFirstExchange = historyPath.Count == 0,
             ContextFileCount = contextFiles.Count,
-            ExistingUserMessage = existingUserMessage,
-            ReplacedMessageId = replacedMessageId,
+            AncestorPath = historyPath,
         };
     }
 
@@ -205,42 +334,76 @@ public sealed class ChatService(
         CancellationToken cancellationToken)
     {
         var (userMessage, assistantMessage) = await PersistAsync(turn, reply, totalTokens, stopped, truncated, cancellationToken);
+
+        // Version positions after saving ("2/2"), for the arrows in the UI.
+        var nodes = await messageRepository.GetNodesAsync(turn.Conversation.ConversationId, CancellationToken.None);
+        MessageDto Dto(Message m)
+        {
+            var siblings = ConversationTree.Siblings(nodes, nodes.Single(n => n.MessageId == m.MessageId));
+            return MessageDto.From(m, siblings.FindIndex(n => n.MessageId == m.MessageId) + 1, siblings.Count);
+        }
+
+        // The previous version is no longer on screen when it was replaced (a regenerated reply needs new text).
+        var superseded = turn.Kind == "edit" || assistantMessage is not null ? turn.PreviousVersionId : null;
         return new StreamTurnResult(
-            MessageDto.From(userMessage),
-            assistantMessage is null ? null : MessageDto.From(assistantMessage),
+            Dto(userMessage),
+            assistantMessage is null ? null : Dto(assistantMessage),
             ConversationDto.From(turn.Conversation),
             stopped,
             truncated,
-            assistantMessage is null ? null : turn.ReplacedMessageId);
+            superseded);
     }
 
     private async Task<(Message User, Message? Assistant)> PersistAsync(ChatTurn turn, string reply, int? totalTokens,
         bool stopped, bool truncated, CancellationToken cancellationToken)
     {
         var conversation = turn.Conversation;
+        var conversationId = conversation.ConversationId;
+
+        // The turn may continue a branch that isn't the visible one (regenerate/edit of an older version): show it.
+        await ActivatePathAsync(conversationId, turn.AncestorPath, cancellationToken);
+
         var userMessage = turn.ExistingUserMessage;
         if (userMessage is null)
         {
-            userMessage = new Message { ConversationId = conversation.ConversationId, Role = MessageRole.User, Content = turn.Text };
+            userMessage = new Message
+            {
+                ConversationId = conversationId,
+                Role = MessageRole.User,
+                Content = turn.Text,
+                ParentMessageId = turn.ParentMessageId,
+                VersionIndex = turn.UserVersionIndex,
+            };
             foreach (var file in turn.NewFiles)
             {
                 userMessage.Attachments.Add(new MessageAttachment { FileId = file.FileId, File = file });
             }
             messageRepository.Add(userMessage);
             await messageRepository.SaveChangesAsync(cancellationToken);
+            // An edited question becomes the visible version; the original branch stays as an earlier version.
+            await messageRepository.ActivateAsync(conversationId, userMessage.ParentMessageId, userMessage.MessageId, cancellationToken);
+        }
+        else
+        {
+            await ActivatePathAsync(conversationId, [new MessageNode(userMessage.MessageId, userMessage.ParentMessageId,
+                userMessage.Role, userMessage.VersionIndex, true)], cancellationToken);
         }
 
-        // Saved separately so the reply always gets the higher MessageId (message order = id order).
-        // A generation stopped before any text keeps just the question; the user can regenerate it later.
+        // Saved separately so the reply always gets the higher MessageId (a thread is in id order).
+        // A generation stopped before any text keeps just the question; the user can regenerate it later,
+        // and a regeneration stopped that early keeps the previous reply on screen.
         Message? assistantMessage = null;
         if (!string.IsNullOrWhiteSpace(reply))
         {
             assistantMessage = new Message
             {
-                ConversationId = conversation.ConversationId,
+                ConversationId = conversationId,
                 Role = MessageRole.Assistant,
                 Content = reply.Trim(),
                 TokenUsage = totalTokens,
+                ParentMessageId = userMessage.MessageId,
+                VersionIndex = turn.ReplyVersionIndex,
+                IsTruncated = stopped,
             };
             messageRepository.Add(assistantMessage);
         }
@@ -254,16 +417,16 @@ public sealed class ChatService(
         conversation.UpdatedAt = DateTime.UtcNow; // marks it modified; AppDbContext stamps the exact time
         await conversationRepository.SaveChangesAsync(cancellationToken);
 
-        if (assistantMessage is not null && turn.ReplacedMessageId is { } replaced)
+        if (assistantMessage is not null)
         {
-            // Only after the new reply is safely saved.
-            await messageRepository.DeleteAsync(replaced, cancellationToken);
+            // The new reply is the visible version; earlier replies to the same question are kept as versions.
+            await messageRepository.ActivateAsync(conversationId, userMessage.MessageId, assistantMessage.MessageId, cancellationToken);
         }
 
         logger.LogInformation(
-            "Conversation {ConversationId}: reply from {Provider}, {Tokens} tokens, {Files} files in context{Truncated}{Stopped}{Regenerated}",
-            conversation.ConversationId, aiProvider.Name, totalTokens, turn.ContextFileCount,
-            truncated ? " (truncated)" : "", stopped ? " (stopped by user)" : "", turn.ExistingUserMessage is null ? "" : " (regenerated)");
+            "Conversation {ConversationId}: {Kind} reply from {Provider}, {Tokens} tokens, {Files} files in context{Truncated}{Stopped}",
+            conversationId, turn.Kind, aiProvider.Name, totalTokens, turn.ContextFileCount,
+            truncated ? " (truncated)" : "", stopped ? " (stopped by user)" : "");
 
         return (userMessage, assistantMessage);
     }

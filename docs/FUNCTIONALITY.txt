@@ -131,21 +131,26 @@ Refresh token             | 7 days     | HttpOnly, Secure, SameSite=Strict cooki
 
 • /chat is a new, empty chat with suggestion cards. The conversation is created only when the first message is sent; the URL then becomes /chat/{conversationId}.
 • After the first exchange the AI generates a short title (3–6 words); if that fails, the start of the first message is used.
-• The sidebar lists conversations (most recently active first, paged) with a ⋯ menu: Rename, Export as TXT, Delete (delete asks for confirmation and removes all messages).
+• The sidebar lists conversations — Pinned first, then Today / Yesterday / Previous 7 days / Older (local time), paged — with a ⋯ menu: Pin/Unpin, Rename, Export as TXT, Archive, Delete (delete asks for confirmation).
+• Archive hides a chat from the main list; Archived chats (sidebar footer) lists them with an Unarchive button. Archived chats can still be opened and searched. Pinning and archiving don't change a chat's "last activity" order.
+• Search (box under New chat) finds chats by title or message text, case-insensitive, 300 ms after you stop typing (2+ characters). Results show the title and a snippet around the match with the words highlighted; Esc clears it.
 • Opening a conversation loads the newest messages; Load earlier messages pages backwards.
 
 4.2 Sending a message
 
 1. The composer accepts up to 8,000 characters. Enter sends, Shift+Enter adds a new line.
 2. The user's message appears immediately; a typing indicator shows until the first words arrive ("Reading your documents…" when files are attached).
-3. The API sends the AI the system instructions + the last 20 messages (within a character budget) + relevant document text, and streams the reply back word by word (Server-Sent Events) with a blinking caret. When it finishes, the question and reply are saved with the token usage, and the thread switches to the saved messages.
+3. The API sends the AI the system instructions + the last 20 messages of the visible thread (within a character budget)
+   • relevant document text, and streams the reply back word by word (Server-Sent Events, read in the browser with fetch + ReadableStream; the screen updates at most every 50 ms) with a blinking caret. When it finishes, the question and reply are saved with the token usage, and the thread switches to the saved messages.
 4. If the AI fails, nothing is saved: the message is removed and the typed text is put back in the composer, with an error toast.
 
-4.3 Stop and regenerate
+4.3 Stop, regenerate, versions and edit
 
-• While a reply streams, the send button becomes Stop (■). Stopping keeps the question and whatever was written so far — it is saved and still there after a reload. Stopped before any text: only the question is kept, with a Generate reply link.
-• Regenerate (on the latest reply) streams a new answer to the same question with the same context; the old reply is replaced only once the new one is saved. If regeneration fails or is stopped before any text, the old reply stays.
-• Only one reply can be generated per conversation at a time (a second one gets a clear "already generating" message).
+• While a reply streams, the send button becomes Stop (■). Stopping keeps the question and whatever was written so far, saved with an "IsTruncated" flag and shown with (stopped) — also after a reload. Stopped before any text: only the question is kept, with a Generate reply link.
+• Regenerate (on the latest reply) streams a new answer to the same question with the same context. The previous answer is kept as a version: arrows ‹ 2/3 › under the reply switch between versions. If regeneration fails or is stopped before any text, the previous answer stays on screen.
+• Edit and resend: hover your message → ✎ → change the text → Save & submit (or Ctrl+Enter; Esc cancels). This starts a new branch from that point: the edited question (keeping its attachments) and a new reply; the AI only sees the branch on screen. The original question and everything after it are kept as version 1 — ‹ 1/2 on the question brings the whole original branch back.
+• How it is stored: every message records its parent (ParentMessageId); versions are siblings with a VersionIndex, and IsActive marks the version shown. The visible thread is found by following the active version from the first message.
+• Only one reply can be generated per conversation at a time (a second one gets a clear "already generating" message); versions can't be switched while a reply streams.
 
 4.4 Replies and code
 
@@ -245,8 +250,8 @@ Table              | Holds
 Users              | account: name, email (unique), optional GoogleId (unique), photo URL, verified flag
 OtpVerifications   | email, code hash and salt, expiry, attempts, used/invalidated flags
 RefreshTokens      | SHA-256 hash of each refresh token, expiry, revoked time (raw tokens are never stored)
-Conversations      | title, owner, created/updated times
-Messages           | role (user / assistant), content, time, AI token usage
+Conversations      | title, owner, created/updated times, IsPinned, ArchivedAt
+Messages           | role (user / assistant), content, time, AI token usage, ParentMessageId / VersionIndex / IsActive (versions and branches), IsTruncated (stopped)
 UploadedFiles      | FileId (GUID), owner, original name, private storage key, verified content type, size, status, page count
 DocumentChunks     | extracted text pieces with location ("Page 2", "Sheet: Sales", "Lines 1-40") for retrieval
 MessageAttachments | which files were attached to which message
@@ -260,27 +265,31 @@ Physical files live in ChatGPTClone.Api/App_Data/uploads under random names; the
 
 Base URL in development: https://localhost:7180 (the Angular dev server proxies /api). All endpoints except sign-in require Authorization: Bearer <access token>. Request/response examples for Postman are in the README.
 
-Method             | Endpoint                                 | Purpose
--------------------+------------------------------------------+-----------------------------------------
-POST               | /api/auth/send-otp · /api/auth/resend-otp | email a sign-in code
-POST               | /api/auth/verify-otp                     | sign in with the code (creates the account if new)
-POST               | /api/auth/google                         | sign in with a Google ID token
-POST               | /api/auth/refresh · /api/auth/logout     | new access token (rotates cookie) · sign out
-GET                | /api/auth/me                             | current user
-GET / PUT          | /api/users/me                            | profile · change name
-GET / POST         | /api/conversations                       | list (paged) · create
-GET / PUT / DELETE | /api/conversations/{id}                  | get · rename · delete
-GET                | /api/conversations/{id}/export           | whole chat as .txt
-GET / POST         | /api/chat/{conversationId}/messages      | message history (paged) · send a message (+ attachmentIds) and get the AI reply
-POST               | /api/chat/{conversationId}/messages/stream | send a message; the reply streams as Server-Sent Events (delta, then done or error)
-POST               | /api/chat/{conversationId}/messages/regenerate | stream a new answer to the last question, replacing the last reply
-POST               | /api/chat/{conversationId}/messages/stop | stop the reply being generated (the partial reply is saved)
-GET                | /api/messages/{messageId}/export?format=txt\|pdf\|docx\|xlsx | a reply as a generated file
-POST               | /api/files/upload                        | upload one file (multipart field file)
-GET                | /api/files/limits                        | allowed types, max size, max files per message
-GET                | /api/files · /api/files/{fileId}         | your files · one file's details
-GET                | /api/files/{fileId}/download             | the original file
-DELETE             | /api/files/{fileId}                      | delete a file
+Method                     | Endpoint                                 | Purpose
+---------------------------+------------------------------------------+-----------------------------------------
+POST                       | /api/auth/send-otp · /api/auth/resend-otp | email a sign-in code
+POST                       | /api/auth/verify-otp                     | sign in with the code (creates the account if new)
+POST                       | /api/auth/google                         | sign in with a Google ID token
+POST                       | /api/auth/refresh · /api/auth/logout     | new access token (rotates cookie) · sign out
+GET                        | /api/auth/me                             | current user
+GET / PUT                  | /api/users/me                            | profile · change name
+GET / POST                 | /api/conversations                       | list (paged; pinned first; ?archived=true for archived chats) · create
+GET                        | /api/conversations/search?q=             | chats whose title or messages contain the text, with a snippet
+GET / PUT / PATCH / DELETE | /api/conversations/{id}                  | get · rename · change title / isPinned / archived · delete
+GET                        | /api/conversations/{id}/export           | whole chat as .txt
+GET / POST                 | /api/chat/{conversationId}/messages      | message history (paged) · send a message (+ attachmentIds) and get the AI reply
+POST                       | /api/chat/{conversationId}/messages/stream | send a message; the reply streams as Server-Sent Events (delta, then done or error)
+POST                       | /api/messages/{messageId}/regenerate     | stream a new version of this reply (earlier versions are kept)
+PUT                        | /api/messages/{messageId}                | edit and resend a user message: new branch + streamed reply
+POST                       | /api/messages/{messageId}/switch-version | show another version ({ "versionNumber" }); returns the thread
+POST                       | /api/chat/{conversationId}/messages/regenerate | same as above for the latest reply (kept for compatibility)
+POST                       | /api/chat/{conversationId}/messages/stop | stop the reply being generated (the partial reply is saved)
+GET                        | /api/messages/{messageId}/export?format=txt\|pdf\|docx\|xlsx | a reply as a generated file
+POST                       | /api/files/upload                        | upload one file (multipart field file)
+GET                        | /api/files/limits                        | allowed types, max size, max files per message
+GET                        | /api/files · /api/files/{fileId}         | your files · one file's details
+GET                        | /api/files/{fileId}/download             | the original file
+DELETE                     | /api/files/{fileId}                      | delete a file
 
 Swagger UI is available at /swagger in development.
 
@@ -347,8 +356,8 @@ Status          | Typical cause
 
 Suite               | Command                                  | Covers
 --------------------+------------------------------------------+-----------------------------------------
-Backend (165 tests) | dotnet test ChatGPTClone.Api.Tests       | OTP and Google sign-in flows, tokens and cookies, ownership (404 for other users), rate limits, chat and AI context, document extraction for every format, uploads and validation, downloads, all four export formats (files re-opened and validated with independent readers), security headers
-Frontend (45 tests) | cd AIChatFrontend; npx ng test --watch=false | composer (Enter/Shift+Enter, uploads, cancel, remove), downloads and exports, error messages, file-name helpers
+Backend (180 tests) | dotnet test ChatGPTClone.Api.Tests       | OTP and Google sign-in flows, tokens and cookies, ownership (404 for other users), rate limits, chat and AI context, document extraction for every format, uploads and validation, downloads, all four export formats (files re-opened and validated with independent readers), security headers
+Frontend (63 tests) | cd AIChatFrontend; npx ng test --watch=false | composer (Enter/Shift+Enter, uploads, cancel, remove), downloads and exports, error messages, file-name helpers
 
 Integration tests run the real API against a temporary database (ChatGPTCloneDB_Tests) with fake email, Google and AI services. Features were also tested end-to-end in the browser with the real Groq model; exported DOCX and XLSX files were opened in Microsoft Word and Excel, and PDFs in the Windows PDF renderer.
 

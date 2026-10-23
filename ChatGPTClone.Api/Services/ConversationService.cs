@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ChatGPTClone.Api.DTOs.Chat;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Middleware;
@@ -7,24 +8,32 @@ namespace ChatGPTClone.Api.Services;
 
 public interface IConversationService
 {
-    Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, CancellationToken cancellationToken);
+    /// <summary>The main list (pinned first) or, with <paramref name="archived"/>, the archived chats.</summary>
+    Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived, CancellationToken cancellationToken);
     Task<ConversationDto> GetAsync(int userId, int conversationId, CancellationToken cancellationToken);
     Task<ConversationDto> CreateAsync(int userId, string? title, CancellationToken cancellationToken);
     Task<ConversationDto> RenameAsync(int userId, int conversationId, string title, CancellationToken cancellationToken);
+
+    /// <summary>Changes only the fields that are set: title, pinned, archived.</summary>
+    Task<ConversationDto> PatchAsync(int userId, int conversationId, PatchConversationRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Chats whose title or messages contain the text, with a snippet around the match.</summary>
+    Task<IReadOnlyList<ConversationSearchResultDto>> SearchAsync(int userId, string query, int limit, CancellationToken cancellationToken);
+
     Task DeleteAsync(int userId, int conversationId, CancellationToken cancellationToken);
 
     /// <summary>Loads a conversation owned by the user or throws 404 (never 403, so ids don't leak).</summary>
     Task<Conversation> GetOwnedOrThrowAsync(int userId, int conversationId, CancellationToken cancellationToken);
 }
 
-public sealed class ConversationService(IConversationRepository repository) : IConversationService
+public sealed partial class ConversationService(IConversationRepository repository, IMessageRepository messages) : IConversationService
 {
     public const string DefaultTitle = "New chat";
 
-    public async Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize,
+    public async Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived,
         CancellationToken cancellationToken)
     {
-        var (items, total) = await repository.ListAsync(userId, page, pageSize, cancellationToken);
+        var (items, total) = await repository.ListAsync(userId, page, pageSize, archived, cancellationToken);
         return new PagedResult<ConversationDto>(
             items.Select(ConversationDto.From).ToList(), page, pageSize, total, page * pageSize < total);
     }
@@ -53,6 +62,48 @@ public sealed class ConversationService(IConversationRepository repository) : IC
         return ConversationDto.From(conversation);
     }
 
+    public async Task<ConversationDto> PatchAsync(int userId, int conversationId, PatchConversationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
+        if (request.Title is { } title)
+        {
+            conversation.Title = title.Trim();
+        }
+        if (request.IsPinned is { } pinned)
+        {
+            conversation.IsPinned = pinned;
+        }
+        if (request.Archived is { } archived)
+        {
+            // Keep the original archive time when "archived" is sent again.
+            conversation.ArchivedAt = archived ? conversation.ArchivedAt ?? DateTime.UtcNow : null;
+        }
+        // Pinning/archiving is not "activity": UpdatedAt (sidebar order) is left unchanged.
+        await repository.SaveChangesAsync(cancellationToken);
+        return ConversationDto.From(conversation);
+    }
+
+    public async Task<IReadOnlyList<ConversationSearchResultDto>> SearchAsync(int userId, string query, int limit,
+        CancellationToken cancellationToken)
+    {
+        var term = Whitespace().Replace(query.Trim(), " ");
+        var hits = await repository.SearchAsync(userId, term, limit, cancellationToken);
+        var messageIds = hits.Where(h => h.MatchingMessageId is not null).Select(h => h.MatchingMessageId!.Value).ToList();
+        var contents = (await messages.GetByIdsAsync(messageIds, cancellationToken)).ToDictionary(m => m.MessageId, m => m.Content);
+
+        return hits.Select(h => new ConversationSearchResultDto(
+                h.Conversation.ConversationId,
+                h.Conversation.Title,
+                h.Conversation.UpdatedAt,
+                h.Conversation.IsPinned,
+                h.Conversation.ArchivedAt,
+                h.Conversation.Title.Contains(term, StringComparison.OrdinalIgnoreCase),
+                h.MatchingMessageId is { } id && contents.TryGetValue(id, out var content) ? Snippet(content, term) : null,
+                h.MatchingMessageId))
+            .ToList();
+    }
+
     public async Task DeleteAsync(int userId, int conversationId, CancellationToken cancellationToken)
     {
         var conversation = await GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
@@ -64,4 +115,34 @@ public sealed class ConversationService(IConversationRepository repository) : IC
         await repository.GetOwnedAsync(conversationId, userId, cancellationToken)
         ?? throw new ApiException(StatusCodes.Status404NotFound, "Conversation not found",
             "This conversation doesn't exist or has been deleted.");
+
+    /// <summary>~160 characters around the first match, on word boundaries, on one line, with "…" where cut.</summary>
+    internal static string Snippet(string content, string term, int before = 60, int after = 100)
+    {
+        var flat = Whitespace().Replace(content, " ").Trim();
+        var index = flat.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+        {
+            return flat.Length <= before + after ? flat : flat[..(before + after)].TrimEnd() + "…";
+        }
+
+        var start = Math.Max(0, index - before);
+        var end = Math.Min(flat.Length, index + term.Length + after);
+
+        // Don't cut words in half: move the start forward / the end back to a space, but never into the match.
+        var firstSpace = start > 0 ? flat.IndexOf(' ', start) : -1;
+        if (firstSpace >= 0 && firstSpace < index)
+        {
+            start = firstSpace + 1;
+        }
+        var lastSpace = end < flat.Length ? flat.LastIndexOf(' ', end) : -1;
+        if (lastSpace >= index + term.Length)
+        {
+            end = lastSpace;
+        }
+        return (start > 0 ? "…" : "") + flat[start..end].Trim() + (end < flat.Length ? "…" : "");
+    }
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
 }

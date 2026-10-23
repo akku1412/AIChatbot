@@ -95,14 +95,27 @@ export class ChatThread {
     });
   }
 
-  /** The last message is a question without a reply (generation was stopped before any text). */
-  protected readonly unansweredQuestion = computed(
-    () => !this.store.sending() && this.store.messages().at(-1)?.role === 'user' && (this.store.messages().at(-1)?.messageId ?? 0) > 0,
-  );
+  /** The last message is a saved question without a reply (generation was stopped before any text). */
+  protected readonly unansweredQuestion = computed(() => {
+    const last = this.store.messages().at(-1);
+    return !this.store.sending() && last?.role === 'user' && last.messageId > 0 ? last : null;
+  });
 
-  protected regenerate(): void {
-    this.store.regenerate().subscribe({
+  protected regenerate(messageId: number): void {
+    this.store.regenerate(messageId).subscribe({
       error: (err: unknown) => this.notifications.error(`Couldn't regenerate the reply. ${errorMessage(err)}`),
+    });
+  }
+
+  protected edit(messageId: number, content: string): void {
+    this.store.editMessage(messageId, content).subscribe({
+      error: (err: unknown) => this.notifications.error(`Your edited message wasn't sent. ${errorMessage(err)}`),
+    });
+  }
+
+  protected switchVersion(messageId: number, versionNumber: number): void {
+    this.store.switchVersion(messageId, versionNumber).subscribe({
+      error: (err: unknown) => this.notifications.error(`Couldn't show that version. ${errorMessage(err)}`),
     });
   }
 

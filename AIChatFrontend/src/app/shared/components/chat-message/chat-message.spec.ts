@@ -13,19 +13,23 @@ describe('ChatMessageView', () => {
   let downloads: string[];
   const restore: (() => void)[] = [];
 
+  const versions = { parentMessageId: null, versionNumber: 1, versionCount: 1, isTruncated: false };
   const reply: ChatMessage = {
     messageId: 42, role: 'assistant', content: '## Totals\n\n| A | B |\n|---|---|\n| 1 | 2 |',
-    createdAt: '2026-10-16T06:00:00Z', tokenUsage: 10, attachments: [],
+    createdAt: '2026-10-16T06:00:00Z', tokenUsage: 10, attachments: [], ...versions,
   };
   const question: ChatMessage = {
     messageId: 41, role: 'user', content: 'Summarize', createdAt: '2026-10-16T06:00:00Z', tokenUsage: null,
-    attachments: [{ fileId: 'f-1', fileName: 'sales.xlsx', fileExtension: '.xlsx', fileSize: 7139 }],
+    attachments: [{ fileId: 'f-1', fileName: 'sales.xlsx', fileExtension: '.xlsx', fileSize: 7139 }], ...versions,
   };
 
-  async function render(message: ChatMessage): Promise<HTMLElement> {
+  async function render(message: ChatMessage, inputs: Record<string, unknown> = {}): Promise<HTMLElement> {
     fixture = TestBed.createComponent(ChatMessageView);
     fixture.componentRef.setInput('message', message);
     fixture.componentRef.setInput('conversationTitle', 'Sales');
+    for (const [name, value] of Object.entries(inputs)) {
+      fixture.componentRef.setInput(name, value);
+    }
     await fixture.whenStable();
     return fixture.nativeElement as HTMLElement;
   }
@@ -115,5 +119,61 @@ describe('ChatMessageView', () => {
     );
     await vi.waitFor(() => expect(errors.length).toBe(1));
     expect(errors[0]).toBe('Couldn\'t download "sales.xlsx". This file is no longer available.');
+  });
+
+  it('edits a user message inline: Save & submit emits the new text, Cancel and unchanged text do not', async () => {
+    const el = await render(question, { canEdit: true });
+    const edits: string[] = [];
+    fixture.componentInstance.edit.subscribe((text) => edits.push(text));
+
+    (el.querySelector('button[aria-label="Edit message"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const box = el.querySelector('textarea') as HTMLTextAreaElement;
+    expect(box.value).toBe('Summarize');
+    const save = () => Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Save & submit')) as HTMLButtonElement;
+    expect(save().disabled).toBe(true); // unchanged
+
+    box.value = 'Summarize the totals';
+    box.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    save().click();
+    fixture.detectChanges();
+    expect(edits).toEqual(['Summarize the totals']);
+    expect(el.querySelector('textarea')).toBeNull();
+
+    (el.querySelector('button[aria-label="Edit message"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(edits).toHaveLength(1);
+  });
+
+  it('has no edit button when editing is not allowed', async () => {
+    const el = await render(question, { canEdit: false });
+    expect(el.querySelector('button[aria-label="Edit message"]')).toBeNull();
+  });
+
+  it('shows "‹ 2/3 ›" for messages with versions and emits the chosen version', async () => {
+    const el = await render({ ...reply, versionNumber: 2, versionCount: 3 });
+    const chosen: number[] = [];
+    fixture.componentInstance.switchVersion.subscribe((v) => chosen.push(v));
+
+    expect(el.querySelector('app-version-switcher .label')?.textContent).toBe('2/3');
+    (el.querySelector('button[aria-label="Previous version"]') as HTMLButtonElement).click();
+    (el.querySelector('button[aria-label="Next version"]') as HTMLButtonElement).click();
+    expect(chosen).toEqual([1, 3]);
+
+    fixture.componentRef.setInput('message', { ...reply, versionNumber: 3, versionCount: 3 });
+    fixture.detectChanges();
+    expect((el.querySelector('button[aria-label="Next version"]') as HTMLButtonElement).disabled).toBe(true);
+
+    fixture.componentRef.setInput('canSwitch', false); // e.g. while a reply streams
+    fixture.detectChanges();
+    expect((el.querySelector('button[aria-label="Previous version"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('marks a stopped reply with "(stopped)"', async () => {
+    expect((await render({ ...reply, isTruncated: true })).querySelector('.stopped')?.textContent).toBe('(stopped)');
+    expect((await render(reply)).querySelector('.stopped')).toBeNull();
   });
 });

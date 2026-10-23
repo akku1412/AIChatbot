@@ -102,7 +102,7 @@ cd AIChatFrontend;    npm start                             # http://localhost:4
 ### 6. Tests
 
 ```powershell
-dotnet test ChatGPTClone.Api.Tests      # 165 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
+dotnet test ChatGPTClone.Api.Tests      # 180 tests; creates and drops a temporary ChatGPTCloneDB_Tests database
 cd AIChatFrontend; npx ng test --watch=false
 ```
 
@@ -121,12 +121,16 @@ limiting, ownership checks) is real. Set `CHATGPTCLONE_TEST_DB` to use another S
 | POST | `/api/auth/logout` | cookie | revokes the refresh token |
 | GET | `/api/auth/me` · `/api/users/me` | JWT | current user |
 | PUT | `/api/users/me` | JWT | `{ "fullName" }` |
-| GET/POST | `/api/conversations` | JWT | list (`?page&pageSize`) / create |
-| GET/PUT/DELETE | `/api/conversations/{id}` | JWT | get / rename `{ "title" }` / delete |
+| GET/POST | `/api/conversations` | JWT | list (`?page&pageSize&archived`; pinned first) / create |
+| GET | `/api/conversations/search?q=` | JWT | title + message search (2–100 chars) with snippets |
+| GET/PUT/PATCH/DELETE | `/api/conversations/{id}` | JWT | get / rename `{ "title" }` / `{ "title"?, "isPinned"?, "archived"? }` / delete |
 | GET | `/api/conversations/{id}/export` | JWT | the whole conversation as a UTF-8 `.txt` download (owner only) |
 | GET/POST | `/api/chat/{id}/messages` | JWT | list (`?limit&before`) / send `{ "content", "attachmentIds" }` |
 | POST | `/api/chat/{id}/messages/stream` | JWT | same body; reply streamed as Server-Sent Events: `delta` `{text}` … then `done` (saved messages) or `error` |
-| POST | `/api/chat/{id}/messages/regenerate` | JWT | stream a new answer to the last question (replaces the last reply) |
+| POST | `/api/messages/{messageId}/regenerate` | JWT | stream a new version of that reply (old versions kept) |
+| PUT | `/api/messages/{messageId}` | JWT | edit and resend `{ "content" }`: new branch + streamed reply |
+| POST | `/api/messages/{messageId}/switch-version` | JWT | `{ "versionNumber" }` → the resulting thread |
+| POST | `/api/chat/{id}/messages/regenerate` | JWT | new version of the latest reply (compatibility route) |
 | POST | `/api/chat/{id}/messages/stop` | JWT | stop the running reply (204; the partial reply is saved) · 404 if nothing is running |
 | POST | `/api/files/upload` | JWT | `multipart/form-data`, field `file` → extracted, returns the file record |
 | GET | `/api/files/limits` | JWT | max size, max files per message, allowed extensions |

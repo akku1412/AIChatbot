@@ -171,6 +171,9 @@ public sealed class StreamingTests(ApiFactory factory) : IDisposable
         var saved = await MessagesAsync(conversationId);
         Assert.Equal(2, saved.Count);
         Assert.Equal("**Echo:** please write", saved[1].Content);
+        Assert.True(saved[1].IsTruncated);
+        Assert.False(saved[0].IsTruncated);
+        Assert.True(done.Data.GetProperty("assistantMessage").GetProperty("isTruncated").GetBoolean());
         Assert.Equal("please write a very long answer", (await factory.WithDbAsync(db => db.Conversations.SingleAsync(c => c.ConversationId == conversationId))).Title);
 
         // Nothing is running any more.
@@ -220,7 +223,7 @@ public sealed class StreamingTests(ApiFactory factory) : IDisposable
     // ---------- Regenerate ----------
 
     [Fact]
-    public async Task Regenerate_replaces_the_last_reply()
+    public async Task Regenerate_adds_a_new_version_of_the_last_reply_and_keeps_the_old_one()
     {
         var (client, token, conversationId) = await ConversationAsync();
         await ReadAllEventsAsync(await client.SendAsync(StreamRequest(conversationId, token, "first question"), HttpCompletionOption.ResponseHeadersRead));
@@ -234,12 +237,19 @@ public sealed class StreamingTests(ApiFactory factory) : IDisposable
         Assert.Equal("done", events[^1].Name);
         Assert.Equal(before[3].MessageId, done.GetProperty("replacedMessageId").GetInt64());
         Assert.Equal(before[2].MessageId, done.GetProperty("userMessage").GetProperty("messageId").GetInt64());
+        var reply = done.GetProperty("assistantMessage");
+        Assert.Equal(2, reply.GetProperty("versionNumber").GetInt32());
+        Assert.Equal(2, reply.GetProperty("versionCount").GetInt32());
 
+        // The old reply is kept as version 1 (inactive); the new one is version 2 (active), same parent.
         var after = await MessagesAsync(conversationId);
-        Assert.Equal(4, after.Count);
-        Assert.Equal(before.Take(3).Select(m => m.MessageId), after.Take(3).Select(m => m.MessageId));
-        Assert.NotEqual(before[3].MessageId, after[3].MessageId);
-        Assert.Equal("**Echo:** second question", after[3].Content);
+        Assert.Equal(5, after.Count);
+        Assert.Equal(before.Select(m => m.MessageId), after.Take(4).Select(m => m.MessageId));
+        Assert.False(after[3].IsActive);
+        Assert.True(after[4].IsActive);
+        Assert.Equal(after[2].MessageId, after[4].ParentMessageId);
+        Assert.Equal((1, 2), (after[3].VersionIndex, after[4].VersionIndex));
+        Assert.Equal("**Echo:** second question", after[4].Content);
 
         // The regenerated answer saw the same context: earlier turn + the same question, without the old reply.
         var prompt = factory.Ai.LastPrompt!;

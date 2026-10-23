@@ -5,6 +5,29 @@ export interface ConversationSummary {
   title: string;
   createdAt: string;
   updatedAt: string;
+  isPinned: boolean;
+  /** Set when the chat is archived (hidden from the main list). */
+  archivedAt: string | null;
+}
+
+/** PATCH /api/conversations/{id}: only the fields present change. */
+export interface ConversationPatch {
+  title?: string;
+  isPinned?: boolean;
+  archived?: boolean;
+}
+
+/** GET /api/conversations/search?q= */
+export interface ConversationSearchResult {
+  conversationId: number;
+  title: string;
+  updatedAt: string;
+  isPinned: boolean;
+  archivedAt: string | null;
+  titleMatches: boolean;
+  /** Text around the match in the newest matching message, if any. */
+  snippet: string | null;
+  messageId: number | null;
 }
 
 export interface PagedResult<T> {
@@ -32,6 +55,13 @@ export interface ChatMessage {
   createdAt: string;
   tokenUsage: number | null;
   attachments: AttachmentInfo[];
+  /** The message this one follows (messages form a tree of versions). */
+  parentMessageId: number | null;
+  /** Position among the versions of this message, for the "‹ 2/3 ›" arrows. */
+  versionNumber: number;
+  versionCount: number;
+  /** The user stopped this reply before it finished. */
+  isTruncated: boolean;
 }
 
 /** GET /api/messages/{id}/export?format=… */

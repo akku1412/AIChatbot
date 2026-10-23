@@ -30,8 +30,16 @@ namespace ChatGPTClone.Api.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ConversationId"));
 
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2(3)");
+
+                    b.Property<bool>("IsPinned")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -49,6 +57,10 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.HasIndex("UserId", "UpdatedAt")
                         .IsDescending(false, true)
                         .HasDatabaseName("IX_Conversations_UserId_UpdatedAt");
+
+                    b.HasIndex("UserId", "ArchivedAt", "IsPinned", "UpdatedAt")
+                        .IsDescending(false, false, true, true)
+                        .HasDatabaseName("IX_Conversations_UserId_Archived_Pinned_UpdatedAt");
 
                     b.ToTable("Conversations", (string)null);
                 });
@@ -109,6 +121,19 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsTruncated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<long?>("ParentMessageId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -118,10 +143,20 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Property<int?>("TokenUsage")
                         .HasColumnType("int");
 
+                    b.Property<int>("VersionIndex")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.HasKey("MessageId");
+
+                    b.HasIndex("ParentMessageId");
 
                     b.HasIndex("ConversationId", "CreatedAt")
                         .HasDatabaseName("IX_Messages_ConversationId_CreatedAt");
+
+                    b.HasIndex("ConversationId", "ParentMessageId")
+                        .HasDatabaseName("IX_Messages_ConversationId_ParentMessageId");
 
                     b.ToTable("Messages", null, t =>
                         {
@@ -395,7 +430,14 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ChatGPTClone.Api.Models.Message", "ParentMessage")
+                        .WithMany()
+                        .HasForeignKey("ParentMessageId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.Navigation("Conversation");
+
+                    b.Navigation("ParentMessage");
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.MessageAttachment", b =>

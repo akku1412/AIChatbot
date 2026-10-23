@@ -1,8 +1,8 @@
-import { Component, ElementRef, computed, inject, input, output, signal } from '@angular/core';
+import { Component, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { finalize } from 'rxjs';
 
 import { errorMessage } from '../../../core/http/api-error';
-import { AttachmentInfo, ChatMessage, ExportFormat } from '../../../core/models/chat.models';
+import { AttachmentInfo, ChatMessage, ExportFormat, MAX_MESSAGE_LENGTH } from '../../../core/models/chat.models';
 import { ChatApiService } from '../../../core/services/chat-api.service';
 import { safeFileName, saveResponse } from '../../../core/services/download';
 import { FileApiService } from '../../../core/services/file-api.service';
@@ -10,6 +10,7 @@ import { AppLogo } from '../app-logo/app-logo';
 import { AttachmentChip } from '../attachment-chip/attachment-chip';
 import { MarkdownView } from '../markdown/markdown';
 import { NotificationService } from '../toast/notification.service';
+import { VersionSwitcher } from '../version-switcher/version-switcher';
 
 interface ExportOption {
   format: ExportFormat;
@@ -24,7 +25,7 @@ interface ExportOption {
  */
 @Component({
   selector: 'app-chat-message',
-  imports: [AppLogo, AttachmentChip, MarkdownView],
+  imports: [AppLogo, AttachmentChip, MarkdownView, VersionSwitcher],
   host: {
     '(document:click)': 'onDocumentClick($event)',
     '(document:keydown.escape)': 'menuOpen.set(false)',
@@ -51,14 +52,62 @@ interface ExportOption {
               }
             </div>
           }
-          @if (message().content) {
-            <div class="content">{{ message().content }}</div>
+          @if (editing()) {
+            <div class="editor">
+              <textarea
+                #editBox
+                rows="3"
+                aria-label="Edit your message"
+                [value]="draft()"
+                [attr.maxlength]="maxLength"
+                (input)="draft.set($any($event.target).value)"
+                (keydown.escape)="cancelEdit()"
+                (keydown.control.enter)="submitEdit()"
+                (keydown.meta.enter)="submitEdit()"
+              ></textarea>
+              <div class="editor-actions">
+                <button type="button" class="ghost" (click)="cancelEdit()">Cancel</button>
+                <button type="button" class="primary" [disabled]="!canSubmitEdit()" (click)="submitEdit()">Save &amp; submit</button>
+              </div>
+            </div>
+          } @else {
+            @if (message().content) {
+              <div class="content">{{ message().content }}</div>
+            }
+            @if (message().messageId > 0 && (canEdit() || message().versionCount > 1)) {
+              <div class="user-actions">
+                @if (message().versionCount > 1) {
+                  <app-version-switcher
+                    [current]="message().versionNumber"
+                    [count]="message().versionCount"
+                    [disabled]="!canSwitch()"
+                    (select)="switchVersion.emit($event)"
+                  />
+                }
+                @if (canEdit()) {
+                  <button type="button" class="action icon-only" aria-label="Edit message" title="Edit message" (click)="startEdit()">
+                    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>
+                  </button>
+                }
+              </div>
+            }
           }
         } @else {
           <app-markdown [content]="message().content" [streaming]="streaming()" />
+          @if (message().isTruncated && !streaming()) {
+            <p class="stopped">(stopped)</p>
+          }
         }
         @if (!isUser() && !streaming()) {
           <div class="actions">
+            @if (message().versionCount > 1) {
+              <app-version-switcher
+                [current]="message().versionNumber"
+                [count]="message().versionCount"
+                [disabled]="!canSwitch()"
+                (select)="switchVersion.emit($event)"
+              />
+            }
             <button type="button" class="action" (click)="copy()" [attr.aria-label]="copied() ? 'Copied' : 'Copy response'">
               @if (copied()) {
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12l5 5L20 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -128,7 +177,28 @@ interface ExportOption {
     .assistant .body { flex: 1; min-width: 0; }
     .content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
     .avatar { margin-top: 2px; }
-    .actions { margin-top: 6px; display: flex; align-items: center; gap: 2px; }
+    .actions { margin-top: 6px; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+    .user-actions { display: flex; align-items: center; gap: 2px; }
+    .action.icon-only { padding: 5px; }
+    /* The edit pencil appears on hover or keyboard focus (touch screens always show it); version arrows stay visible. */
+    .user-actions .icon-only { opacity: 0; transition: opacity 120ms; }
+    .message:hover .user-actions .icon-only, .user-actions .icon-only:focus-visible { opacity: 1; }
+    @media (hover: none) { .user-actions .icon-only { opacity: 1; } }
+    .stopped { margin: 4px 0 0; color: var(--text-muted); font-size: 0.8125rem; font-style: italic; }
+    .editor { width: min(560px, 100%); display: flex; flex-direction: column; gap: 8px; }
+    .editor textarea {
+      width: 100%; min-height: 84px; max-height: 320px; resize: vertical; padding: 10px 14px;
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 14px;
+      background: var(--surface-raised); color: var(--text); font: inherit; line-height: 1.5;
+    }
+    .editor textarea:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+    .editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .editor-actions button {
+      padding: 6px 14px; border-radius: 999px; font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    }
+    .editor-actions .ghost { border: 1px solid var(--border); background: transparent; color: var(--text); }
+    .editor-actions .primary { border: 0; background: var(--text); color: var(--bg); }
+    .editor-actions .primary:disabled { opacity: 0.4; cursor: not-allowed; }
     .action {
       display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px;
       border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.8125rem; cursor: pointer;
@@ -178,7 +248,24 @@ export class ChatMessageView {
   readonly streaming = input(false);
   /** Only the latest reply can be regenerated. */
   readonly canRegenerate = input(false);
+  /** User messages can be edited and resent (not while a reply is streaming). */
+  readonly canEdit = input(false);
+  /** The version arrows work (not while a reply is streaming). */
+  readonly canSwitch = input(true);
   readonly regenerate = output<void>();
+  /** Edit and resend with this new text. */
+  readonly edit = output<string>();
+  /** Show this version (1-based) of the message. */
+  readonly switchVersion = output<number>();
+
+  protected readonly maxLength = MAX_MESSAGE_LENGTH;
+  protected readonly editing = signal(false);
+  protected readonly draft = signal('');
+  protected readonly canSubmitEdit = computed(() => {
+    const text = this.draft().trim();
+    return text.length > 0 && text.length <= MAX_MESSAGE_LENGTH && text !== this.message().content.trim();
+  });
+  private readonly editBox = viewChild<ElementRef<HTMLTextAreaElement>>('editBox');
 
   protected readonly isUser = computed(() => this.message().role === 'user');
   protected readonly copied = signal(false);
@@ -193,6 +280,28 @@ export class ChatMessageView {
     { format: 'docx', label: 'Download as DOCX', hint: 'Editable Word document' },
     { format: 'xlsx', label: 'Download as XLSX', hint: 'Tables as an Excel sheet' },
   ];
+
+  protected startEdit(): void {
+    this.draft.set(this.message().content);
+    this.editing.set(true);
+    setTimeout(() => {
+      const box = this.editBox()?.nativeElement;
+      box?.focus();
+      box?.setSelectionRange(box.value.length, box.value.length);
+    });
+  }
+
+  protected cancelEdit(): void {
+    this.editing.set(false);
+  }
+
+  protected submitEdit(): void {
+    if (!this.canSubmitEdit()) {
+      return;
+    }
+    this.editing.set(false);
+    this.edit.emit(this.draft().trim());
+  }
 
   protected toggleMenu(event: MouseEvent): void {
     event.stopPropagation();

@@ -1,27 +1,60 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { EMPTY, Observable, finalize, map, of, switchMap, tap } from 'rxjs';
+import { EMPTY, Observable, Subscription, finalize, map, of, switchMap, tap } from 'rxjs';
 
 import { errorMessage } from '../http/api-error';
-import { AttachmentInfo, ChatMessage, ChatStreamEvent, ConversationSummary, StreamTurnResult } from '../models/chat.models';
+import {
+  AttachmentInfo,
+  ChatMessage,
+  ChatStreamEvent,
+  ConversationPatch,
+  ConversationSearchResult,
+  ConversationSummary,
+  StreamTurnResult,
+} from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
 
 const PAGE_SIZE = 20;
+/** Streamed text is applied to the screen at most this often (smooth, and Markdown isn't re-rendered per token). */
+export const STREAM_RENDER_INTERVAL_MS = 50;
+
+/** What a streaming turn shows while it runs, and how to undo it. */
+interface TurnView {
+  /** Messages above the question (unchanged by the turn). */
+  before: ChatMessage[];
+  /** The question shown while streaming: a temporary one (send/edit) or the existing one (regenerate). */
+  question: ChatMessage;
+  /** The thread as it was before the turn started, restored if the turn fails. */
+  snapshot: ChatMessage[];
+  /** Regenerate: if stopped before any text, the previous reply is still the visible one. */
+  keepSnapshotIfEmpty: boolean;
+}
 
 /**
- * Signal-based state for the chat dashboard: the sidebar's conversation list and the open thread.
+ * Signal-based state for the chat dashboard: the sidebar's conversation lists and the open thread.
  * Components read signals and call methods; only this class talks to ChatApiService.
  */
 @Injectable({ providedIn: 'root' })
 export class ChatStore {
   private readonly api = inject(ChatApiService);
 
-  // ----- Conversation list (sidebar) -----
+  // ----- Conversation lists (sidebar) -----
   private readonly conversationList = signal<ConversationSummary[]>([]);
   private loadedPage = 0;
   readonly conversations = this.conversationList.asReadonly();
   readonly listLoading = signal(false);
   readonly listError = signal<string | null>(null);
   readonly hasMoreConversations = signal(false);
+
+  private readonly archivedList = signal<ConversationSummary[] | null>(null);
+  /** Archived chats, or null until they are loaded. */
+  readonly archivedConversations = this.archivedList.asReadonly();
+  readonly archivedLoading = signal(false);
+
+  /** Search results for the sidebar box, or null when not searching. */
+  readonly searchResults = signal<ConversationSearchResult[] | null>(null);
+  readonly searchLoading = signal(false);
+  readonly searchError = signal<string | null>(null);
+  private searchSubscription?: Subscription;
 
   // ----- Open conversation -----
   readonly activeConversationId = signal<number | null>(null);
@@ -42,13 +75,16 @@ export class ChatStore {
     return id !== null && !this.messages().find((m) => m.messageId === id)?.content;
   });
 
-  private activeStream: { abort: () => void } | null = null;
-
   readonly activeConversation = computed(
-    () => this.conversationList().find((c) => c.conversationId === this.activeConversationId()) ?? null,
+    () =>
+      [...this.conversationList(), ...(this.archivedList() ?? [])].find((c) => c.conversationId === this.activeConversationId()) ??
+      null,
   );
 
+  private activeStream: { abort: (reload?: boolean) => void } | null = null;
   private nextTempId = -1;
+
+  // =============== Sidebar ===============
 
   loadConversations(): void {
     this.loadedPage = 0;
@@ -69,12 +105,99 @@ export class ChatStore {
       .subscribe({
         next: (page) => {
           this.loadedPage = page.page;
-          this.conversationList.update((list) => mergeById(list, page.items));
+          this.conversationList.update((list) => sortConversations(mergeById(list, page.items)));
           this.hasMoreConversations.set(page.hasMore);
         },
         error: (err: unknown) => this.listError.set(errorMessage(err)),
       });
   }
+
+  loadArchived(): void {
+    if (this.archivedLoading()) {
+      return;
+    }
+    this.archivedLoading.set(true);
+    this.api
+      .listConversations(1, 50, true)
+      .pipe(finalize(() => this.archivedLoading.set(false)))
+      .subscribe({
+        next: (page) => this.archivedList.set(page.items),
+        error: (err: unknown) => this.listError.set(errorMessage(err)),
+      });
+  }
+
+  /** Searches titles and message text; queries shorter than 2 characters clear the results. */
+  search(query: string): void {
+    this.searchSubscription?.unsubscribe();
+    const term = query.trim();
+    if (term.length < 2) {
+      this.searchResults.set(null);
+      this.searchLoading.set(false);
+      this.searchError.set(null);
+      return;
+    }
+    this.searchLoading.set(true);
+    this.searchError.set(null);
+    this.searchSubscription = this.api
+      .searchConversations(term)
+      .pipe(finalize(() => this.searchLoading.set(false)))
+      .subscribe({
+        next: (results) => this.searchResults.set(results),
+        error: (err: unknown) => this.searchError.set(errorMessage(err)),
+      });
+  }
+
+  setPinned(conversation: ConversationSummary, isPinned: boolean): Observable<ConversationSummary> {
+    return this.patch(conversation.conversationId, { isPinned });
+  }
+
+  setArchived(conversation: ConversationSummary, archived: boolean): Observable<ConversationSummary> {
+    return this.patch(conversation.conversationId, { archived });
+  }
+
+  renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {
+    return this.api.renameConversation(conversationId, title).pipe(tap((updated) => this.upsert(updated)));
+  }
+
+  /** Deletes on the server first; the sidebar only changes once that succeeded. */
+  deleteConversation(conversationId: number): Observable<void> {
+    return this.api.deleteConversation(conversationId).pipe(
+      tap(() => {
+        this.removeFromLists(conversationId);
+        if (this.activeConversationId() === conversationId) {
+          this.startNewChat();
+        }
+      }),
+    );
+  }
+
+  private patch(conversationId: number, patch: ConversationPatch): Observable<ConversationSummary> {
+    return this.api.patchConversation(conversationId, patch).pipe(tap((updated) => this.upsert(updated)));
+  }
+
+  /** Puts a changed conversation in the right list (main or archived), in the right place. */
+  private upsert(conversation: ConversationSummary): void {
+    const id = conversation.conversationId;
+    if (conversation.archivedAt) {
+      this.conversationList.update((list) => list.filter((c) => c.conversationId !== id));
+      this.archivedList.update((list) => (list ? [conversation, ...list.filter((c) => c.conversationId !== id)] : list));
+    } else {
+      this.archivedList.update((list) => list?.filter((c) => c.conversationId !== id) ?? null);
+      this.conversationList.update((list) => sortConversations([conversation, ...list.filter((c) => c.conversationId !== id)]));
+    }
+    this.searchResults.update((results) =>
+      results?.map((r) => (r.conversationId === id ? { ...r, title: conversation.title, isPinned: conversation.isPinned, archivedAt: conversation.archivedAt } : r)) ??
+      null,
+    );
+  }
+
+  private removeFromLists(conversationId: number): void {
+    this.conversationList.update((list) => list.filter((c) => c.conversationId !== conversationId));
+    this.archivedList.update((list) => list?.filter((c) => c.conversationId !== conversationId) ?? null);
+    this.searchResults.update((results) => results?.filter((r) => r.conversationId !== conversationId) ?? null);
+  }
+
+  // =============== Thread ===============
 
   /** Clears the thread for a brand-new chat (the conversation is created on the first message). */
   startNewChat(): void {
@@ -135,10 +258,13 @@ export class ChatStore {
    * immediately; on failure it is removed again and the error propagates to the caller.
    */
   send(content: string, attachments: AttachmentInfo[] = []): Observable<number> {
-    const question = this.tempMessage('user', content, attachments);
-    const reply = this.tempMessage('assistant', '');
-    this.messages.update((list) => [...list, question, reply]);
-    this.beginStreaming(reply.messageId, attachments.length > 0);
+    const snapshot = this.messages();
+    const view: TurnView = {
+      before: snapshot,
+      question: this.tempMessage('user', content, attachments),
+      snapshot,
+      keepSnapshotIfEmpty: false,
+    };
 
     const existingId = this.activeConversationId();
     let createdId: number | null = null;
@@ -147,138 +273,197 @@ export class ChatStore {
       : this.api.createConversation().pipe(
           tap((conversation) => {
             createdId = conversation.conversationId;
-            this.conversationList.update((list) => [conversation, ...list]);
+            this.conversationList.update((list) => sortConversations([conversation, ...list]));
             this.activeConversationId.set(conversation.conversationId);
           }),
           map((conversation) => conversation.conversationId),
         );
 
-    return conversationId$.pipe(
-      switchMap((conversationId) =>
-        this.consumeStream(
-          conversationId,
-          this.api.streamMessage(conversationId, content, attachments.map((a) => a.fileId)),
-          { questionTempId: question.messageId, replyTempId: reply.messageId, replaced: null },
-        ),
-      ),
+    return this.runTurn(
+      view,
+      attachments.length > 0,
+      conversationId$.pipe(map((id) => ({ id, events: this.api.streamMessage(id, content, attachments.map((a) => a.fileId)) }))),
+    ).pipe(
       tap({
         error: () => {
-          this.messages.update((list) => list.filter((m) => m.messageId !== question.messageId && m.messageId !== reply.messageId));
           if (createdId !== null) {
             this.discardEmptyConversation(createdId);
           }
         },
       }),
-      finalize(() => this.endStreaming()),
     );
   }
 
   /**
-   * Streams a new answer to the last question. The old reply disappears while the new one streams and comes
-   * back if regeneration fails or is stopped before any text.
+   * A new version of this reply (or a first reply, when given a question without one). The old reply is hidden while
+   * the new one streams; it stays available as an earlier version ("‹ 1/2"), and comes back if this fails.
    */
-  regenerate(): Observable<number> {
+  regenerate(messageId: number): Observable<number> {
+    const conversationId = this.activeConversationId();
+    const list = this.messages();
+    const index = list.findIndex((m) => m.messageId === messageId);
+    if (!conversationId || this.sending() || index < 0) {
+      return EMPTY;
+    }
+    const target = list[index];
+    const questionIndex = target.role === 'user' ? index : index - 1;
+    const question = list[questionIndex];
+    if (!question || question.role !== 'user') {
+      return EMPTY;
+    }
+
+    const view: TurnView = { before: list.slice(0, questionIndex), question, snapshot: list, keepSnapshotIfEmpty: true };
+    return this.runTurn(view, false, of({ id: conversationId, events: this.api.regenerateMessage(messageId) }));
+  }
+
+  /** Edit and resend: replaces the question and everything after it with a new branch (the old one is kept). */
+  editMessage(messageId: number, content: string): Observable<number> {
+    const conversationId = this.activeConversationId();
+    const list = this.messages();
+    const index = list.findIndex((m) => m.messageId === messageId);
+    if (!conversationId || this.sending() || index < 0 || list[index].role !== 'user') {
+      return EMPTY;
+    }
+    const original = list[index];
+    const edited: ChatMessage = {
+      ...this.tempMessage('user', content, original.attachments),
+      parentMessageId: original.parentMessageId,
+      versionNumber: original.versionCount + 1,
+      versionCount: original.versionCount + 1,
+    };
+    const view: TurnView = { before: list.slice(0, index), question: edited, snapshot: list, keepSnapshotIfEmpty: false };
+    return this.runTurn(view, original.attachments.length > 0, of({ id: conversationId, events: this.api.editMessage(messageId, content) }));
+  }
+
+  /** The "‹ ›" arrows: shows another version of a message and the thread that follows it. */
+  switchVersion(messageId: number, versionNumber: number): Observable<void> {
     const conversationId = this.activeConversationId();
     if (!conversationId || this.sending()) {
       return EMPTY;
     }
-    const last = this.messages().at(-1);
-    const replaced = last?.role === 'assistant' ? last : null;
-    const reply = this.tempMessage('assistant', '');
-    this.messages.update((list) => [...list.filter((m) => m !== replaced), reply]);
-    this.beginStreaming(reply.messageId, false);
-
-    return this.consumeStream(conversationId, this.api.regenerate(conversationId), {
-      questionTempId: null,
-      replyTempId: reply.messageId,
-      replaced,
-    }).pipe(
-      tap({
-        error: () =>
-          this.messages.update((list) => [...list.filter((m) => m.messageId !== reply.messageId), ...(replaced ? [replaced] : [])]),
+    return this.api.switchVersion(messageId, versionNumber).pipe(
+      tap((page) => {
+        if (this.activeConversationId() === conversationId) {
+          this.messages.set(page.items);
+          this.hasOlderMessages.set(page.hasMore);
+        }
       }),
-      finalize(() => this.endStreaming()),
+      map(() => undefined),
     );
   }
 
   /**
-   * Stop generating: the server ends the stream with a "done" (stopped) event and keeps the partial reply.
-   * If no such event arrives (e.g. the reply ran on another server instance), the stream is closed from here,
-   * which also stops and saves it on the server, and the thread is reloaded.
+   * Stop generating. The server cancels the AI call, saves the partial reply (marked as stopped) and ends the stream
+   * with a "done" event carrying the saved messages. If that request fails (or nothing arrives, e.g. the reply runs on
+   * another server instance), the fetch is aborted — which also stops and saves it on the server — and the thread reloads.
    */
   stopGeneration(): void {
     const conversationId = this.activeConversationId();
-    if (!conversationId || !this.sending()) {
+    if (!conversationId || !this.sending() || this.stopping()) {
       return;
     }
     this.stopping.set(true);
-    this.api.stopGeneration(conversationId).subscribe({ error: () => undefined });
-    setTimeout(() => {
-      if (this.sending() && this.stopping() && this.activeStream) {
-        this.activeStream.abort();
+    const abort = () => {
+      if (this.sending() && this.stopping()) {
+        this.activeStream?.abort();
       }
-    }, 8000);
+    };
+    this.api.stopGeneration(conversationId).subscribe({ error: abort });
+    setTimeout(abort, 8000);
   }
 
-  private consumeStream(
-    conversationId: number,
-    events: Observable<ChatStreamEvent>,
-    temp: { questionTempId: number | null; replyTempId: number; replaced: ChatMessage | null },
+  /** Streams one turn into the thread and swaps in the saved messages from the "done" event. */
+  private runTurn(
+    view: TurnView,
+    withFiles: boolean,
+    start$: Observable<{ id: number; events: Observable<ChatStreamEvent> }>,
   ): Observable<number> {
+    const reply = this.tempMessage('assistant', '');
+    this.messages.set([...view.before, view.question, reply]);
+    this.messagesError.set(null);
+    this.sending.set(true);
+    this.stopping.set(false);
+    this.sendingWithFiles.set(withFiles);
+    this.streamingMessageId.set(reply.messageId);
+
+    return start$.pipe(
+      switchMap(({ id, events }) => this.consumeStream(id, events, view, reply.messageId)),
+      tap({ error: () => this.messages.set(view.snapshot) }),
+      finalize(() => this.endStreaming()),
+    );
+  }
+
+  private consumeStream(conversationId: number, events: Observable<ChatStreamEvent>, view: TurnView, replyId: number): Observable<number> {
     return new Observable<number>((subscriber) => {
+      // Deltas are buffered and applied every STREAM_RENDER_INTERVAL_MS.
+      let pending = '';
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const flush = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (pending) {
+          const text = pending;
+          pending = '';
+          this.messages.update((list) => list.map((m) => (m.messageId === replyId ? { ...m, content: m.content + text } : m)));
+        }
+      };
+
       const subscription = events.subscribe({
         next: (event) => {
           if (event.type === 'delta') {
-            this.messages.update((list) =>
-              list.map((m) => (m.messageId === temp.replyTempId ? { ...m, content: m.content + event.text } : m)),
-            );
+            pending += event.text;
+            timer ??= setTimeout(flush, STREAM_RENDER_INTERVAL_MS);
             return;
           }
-          this.applyResult(conversationId, event.result, temp);
+          flush();
+          this.applyResult(conversationId, event.result, view);
           subscriber.next(conversationId);
         },
-        error: (err: unknown) => subscriber.error(err),
-        complete: () => subscriber.complete(),
+        error: (err: unknown) => {
+          flush();
+          subscriber.error(err);
+        },
+        complete: () => {
+          flush();
+          subscriber.complete();
+        },
       });
 
       this.activeStream = {
-        // Closing the stream stops generation on the server too; reload to show what it saved.
-        abort: () => {
+        // Aborting the fetch stops generation on the server too; reload to show what it saved.
+        abort: (reload = true) => {
           subscription.unsubscribe();
+          flush();
           this.endStreaming();
-          this.reloadMessages(conversationId);
+          if (reload) {
+            setTimeout(() => this.reloadMessages(conversationId), 1000);
+          }
           subscriber.complete();
         },
       };
-      return () => subscription.unsubscribe();
+      return () => {
+        if (timer) {
+          clearTimeout(timer);
+        }
+        subscription.unsubscribe();
+      };
     });
   }
 
   /** Swaps the temporary messages for the saved ones from the "done" event. */
-  private applyResult(
-    conversationId: number,
-    result: StreamTurnResult,
-    temp: { questionTempId: number | null; replyTempId: number; replaced: ChatMessage | null },
-  ): void {
+  private applyResult(conversationId: number, result: StreamTurnResult, view: TurnView): void {
     if (this.activeConversationId() === conversationId) {
-      this.messages.update((list) => {
-        const kept = list.filter(
-          (m) => m.messageId !== temp.questionTempId && m.messageId !== temp.replyTempId && m.messageId !== result.replacedMessageId,
-        );
-        const added: ChatMessage[] = [];
-        if (temp.questionTempId !== null) {
-          added.push(result.userMessage);
-        }
-        if (result.assistantMessage) {
-          added.push(result.assistantMessage);
-        } else if (temp.replaced) {
-          added.push(temp.replaced); // stopped before any text: the old reply stays
-        }
-        return [...kept, ...added];
-      });
+      if (!result.assistantMessage && view.keepSnapshotIfEmpty) {
+        // A regeneration stopped before any text: the previous reply is still the visible version.
+        this.messages.set(view.snapshot);
+      } else {
+        this.messages.set([...view.before, result.userMessage, ...(result.assistantMessage ? [result.assistantMessage] : [])]);
+      }
     }
-    // Move the conversation to the top with its (possibly generated) title.
-    this.conversationList.update((list) => [result.conversation, ...list.filter((c) => c.conversationId !== conversationId)]);
+    // Update the sidebar entry (title may have been generated; recent activity moves it up).
+    this.upsert(result.conversation);
   }
 
   private reloadMessages(conversationId: number): void {
@@ -294,15 +479,18 @@ export class ChatStore {
   }
 
   private tempMessage(role: ChatMessage['role'], content: string, attachments: AttachmentInfo[] = []): ChatMessage {
-    return { messageId: this.nextTempId--, role, content, createdAt: new Date().toISOString(), tokenUsage: null, attachments };
-  }
-
-  private beginStreaming(replyTempId: number, withFiles: boolean): void {
-    this.messagesError.set(null);
-    this.sending.set(true);
-    this.stopping.set(false);
-    this.sendingWithFiles.set(withFiles);
-    this.streamingMessageId.set(replyTempId);
+    return {
+      messageId: this.nextTempId--,
+      role,
+      content,
+      createdAt: new Date().toISOString(),
+      tokenUsage: null,
+      attachments,
+      parentMessageId: null,
+      versionNumber: 1,
+      versionCount: 1,
+      isTruncated: false,
+    };
   }
 
   private endStreaming(): void {
@@ -312,34 +500,12 @@ export class ChatStore {
     this.activeStream = null;
   }
 
-  renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {
-    return this.api.renameConversation(conversationId, title).pipe(
-      tap((updated) =>
-        this.conversationList.update((list) =>
-          list.map((c) => (c.conversationId === conversationId ? updated : c)),
-        ),
-      ),
-    );
-  }
-
-  /** Deletes on the server first; the sidebar only changes once that succeeded. */
-  deleteConversation(conversationId: number): Observable<void> {
-    return this.api.deleteConversation(conversationId).pipe(
-      tap(() => {
-        this.conversationList.update((list) => list.filter((c) => c.conversationId !== conversationId));
-        if (this.activeConversationId() === conversationId) {
-          this.startNewChat();
-        }
-      }),
-    );
-  }
-
   /**
    * The first message of a new chat failed (e.g. the AI is unavailable), so the conversation created
    * for it has no messages: remove it instead of leaving an empty "New chat" in the sidebar.
    */
   private discardEmptyConversation(conversationId: number): void {
-    this.conversationList.update((list) => list.filter((c) => c.conversationId !== conversationId));
+    this.removeFromLists(conversationId);
     if (this.activeConversationId() === conversationId) {
       this.activeConversationId.set(null);
     }
@@ -348,7 +514,11 @@ export class ChatStore {
 
   /** Called on logout so the next user never sees the previous user's data. */
   reset(): void {
+    this.activeStream?.abort(false);
     this.conversationList.set([]);
+    this.archivedList.set(null);
+    this.searchSubscription?.unsubscribe();
+    this.searchResults.set(null);
     this.loadedPage = 0;
     this.hasMoreConversations.set(false);
     this.listError.set(null);
@@ -359,4 +529,11 @@ export class ChatStore {
 function mergeById(existing: ConversationSummary[], incoming: ConversationSummary[]): ConversationSummary[] {
   const seen = new Set(existing.map((c) => c.conversationId));
   return [...existing, ...incoming.filter((c) => !seen.has(c.conversationId))];
+}
+
+/** Pinned first, then most recently active — the same order as the API. */
+export function sortConversations(list: ConversationSummary[]): ConversationSummary[] {
+  return [...list].sort(
+    (a, b) => Number(b.isPinned) - Number(a.isPinned) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.conversationId - a.conversationId,
+  );
 }

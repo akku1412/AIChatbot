@@ -57,12 +57,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 entry.Property(e => e.CreatedAt).IsModified = false;
             }
 
-            if (entry.Entity is IAuditable auditable && entry.State is EntityState.Added or EntityState.Modified)
+            // UpdatedAt means "last activity" (it orders the sidebar), so organising a chat (pin, archive) doesn't count.
+            var isActivity = entry.State == EntityState.Added ||
+                (entry.State == EntityState.Modified &&
+                 entry.Properties.Any(p => p.IsModified && !NotActivity.Contains(p.Metadata.Name)));
+            if (entry.Entity is IAuditable auditable && isActivity)
             {
                 auditable.UpdatedAt = utcNow;
             }
         }
     }
+
+    private static readonly HashSet<string> NotActivity = [nameof(Conversation.IsPinned), nameof(Conversation.ArchivedAt)];
 
     private sealed class UtcDateTimeConverter() : ValueConverter<DateTime, DateTime>(
         v => v.Kind == DateTimeKind.Utc ? v : v.ToUniversalTime(),

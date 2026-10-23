@@ -53,17 +53,21 @@
               [conversationTitle]="store.activeConversation()?.title ?? ''"
               [streaming]="message.messageId === store.streamingMessageId()"
               [canRegenerate]="last && message.role === 'assistant' && !store.sending()"
-              (regenerate)="regenerate()"
+              [canEdit]="message.role === 'user' && message.messageId > 0 && !store.sending()"
+              [canSwitch]="!store.sending()"
+              (regenerate)="regenerate(message.messageId)"
+              (edit)="edit(message.messageId, $event)"
+              (switchVersion)="switchVersion(message.messageId, $event)"
             />
           }
         }
         @if (store.waitingForFirstToken()) {
           <app-typing-indicator [label]="store.sendingWithFiles() ? 'Reading your documents…' : ''" />
         }
-        @if (unansweredQuestion()) {
+        @if (unansweredQuestion(); as question) {
           <div class="unanswered">
             <span>No reply yet.</span>
-            <button type="button" class="link" (click)="regenerate()">Generate reply</button>
+            <button type="button" class="link" (click)="regenerate(question.messageId)">Generate reply</button>
           </div>
         }
       }

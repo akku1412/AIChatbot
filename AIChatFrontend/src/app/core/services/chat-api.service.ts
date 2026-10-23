@@ -1,11 +1,4 @@
-import {
-  HttpClient,
-  HttpDownloadProgressEvent,
-  HttpErrorResponse,
-  HttpEventType,
-  HttpParams,
-  HttpResponse,
-} from '@angular/common/http';
+import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
@@ -13,26 +6,34 @@ import { environment } from '../../../environments/environment';
 import { readBlobErrors } from '../http/api-error';
 import {
   ChatStreamEvent,
+  ConversationPatch,
+  ConversationSearchResult,
   ConversationSummary,
   ExportFormat,
   MessagePage,
   PagedResult,
   SendMessageResponse,
-  StreamTurnResult,
 } from '../models/chat.models';
-import { SseParser } from './sse-parser';
+import { ChatStreamService } from './chat-stream.service';
 
 /** Typed HTTP calls for conversations and messages. Ownership is enforced by the API from the JWT. */
 @Injectable({ providedIn: 'root' })
 export class ChatApiService {
   private readonly http = inject(HttpClient);
+  private readonly streams = inject(ChatStreamService);
   private readonly conversationsUrl = `${environment.apiBaseUrl}/conversations`;
   private readonly chatUrl = `${environment.apiBaseUrl}/chat`;
   private readonly messagesUrl = `${environment.apiBaseUrl}/messages`;
 
-  listConversations(page: number, pageSize: number): Observable<PagedResult<ConversationSummary>> {
-    const params = new HttpParams().set('page', page).set('pageSize', pageSize);
+  /** The main list (pinned first) or, with archived = true, the archived chats. */
+  listConversations(page: number, pageSize: number, archived = false): Observable<PagedResult<ConversationSummary>> {
+    const params = new HttpParams().set('page', page).set('pageSize', pageSize).set('archived', archived);
     return this.http.get<PagedResult<ConversationSummary>>(this.conversationsUrl, { params });
+  }
+
+  /** Chats whose title or messages contain the text (2–100 characters). */
+  searchConversations(query: string): Observable<ConversationSearchResult[]> {
+    return this.http.get<ConversationSearchResult[]>(`${this.conversationsUrl}/search`, { params: { q: query } });
   }
 
   getConversation(conversationId: number): Observable<ConversationSummary> {
@@ -45,6 +46,11 @@ export class ChatApiService {
 
   renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {
     return this.http.put<ConversationSummary>(`${this.conversationsUrl}/${conversationId}`, { title });
+  }
+
+  /** Pin/unpin, archive/unarchive or rename. */
+  patchConversation(conversationId: number, patch: ConversationPatch): Observable<ConversationSummary> {
+    return this.http.patch<ConversationSummary>(`${this.conversationsUrl}/${conversationId}`, patch);
   }
 
   deleteConversation(conversationId: number): Observable<void> {
@@ -65,7 +71,7 @@ export class ChatApiService {
       .pipe(readBlobErrors());
   }
 
-  /** Newest page of messages; pass beforeMessageId to load older ones. Items are oldest-first. */
+  /** Newest page of the visible thread; pass beforeMessageId to load older messages. Items are oldest-first. */
   getMessages(conversationId: number, beforeMessageId?: number, limit = 50): Observable<MessagePage> {
     let params = new HttpParams().set('limit', limit);
     if (beforeMessageId) {
@@ -74,79 +80,33 @@ export class ChatApiService {
     return this.http.get<MessagePage>(`${this.chatUrl}/${conversationId}/messages`, { params });
   }
 
-  /** attachmentIds come from POST /api/files/upload; content may be empty when files are attached. */
+  /** Non-streaming fallback: attachmentIds come from POST /api/files/upload; content may be empty with files. */
   sendMessage(conversationId: number, content: string, attachmentIds: string[] = []): Observable<SendMessageResponse> {
     return this.http.post<SendMessageResponse>(`${this.chatUrl}/${conversationId}/messages`, { content, attachmentIds });
   }
 
   /** Sends a message and streams the reply: "delta" pieces, then "done" with the saved messages. */
   streamMessage(conversationId: number, content: string, attachmentIds: string[] = []): Observable<ChatStreamEvent> {
-    return this.stream(`${this.chatUrl}/${conversationId}/messages/stream`, { content, attachmentIds });
+    return this.streams.stream(`${this.chatUrl}/${conversationId}/messages/stream`, 'POST', { content, attachmentIds });
   }
 
-  /** Streams a new answer to the conversation's last question, replacing the previous reply. */
-  regenerate(conversationId: number): Observable<ChatStreamEvent> {
-    return this.stream(`${this.chatUrl}/${conversationId}/messages/regenerate`, {});
+  /** Streams a new version of this AI reply (or a first reply, for a question without one). */
+  regenerateMessage(messageId: number): Observable<ChatStreamEvent> {
+    return this.streams.stream(`${this.messagesUrl}/${messageId}/regenerate`, 'POST', {});
+  }
+
+  /** Edit and resend: a new version of this user message, then a streamed reply on the new branch. */
+  editMessage(messageId: number, content: string): Observable<ChatStreamEvent> {
+    return this.streams.stream(`${this.messagesUrl}/${messageId}`, 'PUT', { content });
+  }
+
+  /** Shows another version of a message; returns the newest page of the resulting thread. */
+  switchVersion(messageId: number, versionNumber: number): Observable<MessagePage> {
+    return this.http.post<MessagePage>(`${this.messagesUrl}/${messageId}/switch-version`, { versionNumber });
   }
 
   /** Asks the server to stop the reply being generated; the stream then ends with a "done" (stopped) event. */
   stopGeneration(conversationId: number): Observable<void> {
     return this.http.post<void>(`${this.chatUrl}/${conversationId}/messages/stop`, {});
-  }
-
-  /**
-   * POSTs and reads the Server-Sent Events response as it arrives (XHR progress events expose the partial text),
-   * so the auth interceptor (token + refresh on 401) still applies. Unsubscribing aborts the request.
-   * An "error" event, or a stream that ends without "done", errors the Observable with an HttpErrorResponse.
-   */
-  private stream(url: string, body: object): Observable<ChatStreamEvent> {
-    return new Observable<ChatStreamEvent>((subscriber) => {
-      const parser = new SseParser();
-      let consumed = 0;
-      let done = false;
-
-      const consume = (text: string): void => {
-        for (const sse of parser.push(text.slice(consumed))) {
-          const data = JSON.parse(sse.data) as Record<string, unknown>;
-          if (sse.event === 'delta') {
-            subscriber.next({ type: 'delta', text: String(data['text'] ?? '') });
-          } else if (sse.event === 'done') {
-            done = true;
-            subscriber.next({ type: 'done', result: data as unknown as StreamTurnResult });
-          } else if (sse.event === 'error') {
-            subscriber.error(new HttpErrorResponse({ status: Number(data['status']) || 500, error: data, url }));
-          }
-        }
-        consumed = text.length;
-      };
-
-      const request = this.http
-        .post(url, body, { observe: 'events', reportProgress: true, responseType: 'text' })
-        .pipe(readBlobErrors())
-        .subscribe({
-          next: (event) => {
-            if (event.type === HttpEventType.DownloadProgress) {
-              consume((event as HttpDownloadProgressEvent).partialText ?? '');
-            } else if (event.type === HttpEventType.Response) {
-              consume(event.body ?? '');
-              if (subscriber.closed) {
-                return;
-              }
-              if (done) {
-                subscriber.complete();
-              } else {
-                subscriber.error(new HttpErrorResponse({
-                  status: 0,
-                  url,
-                  error: { title: 'Reply interrupted', detail: 'The connection was lost before the reply finished. Please try again.' },
-                }));
-              }
-            }
-          },
-          error: (err: unknown) => subscriber.error(err),
-        });
-
-      return () => request.unsubscribe();
-    });
   }
 }

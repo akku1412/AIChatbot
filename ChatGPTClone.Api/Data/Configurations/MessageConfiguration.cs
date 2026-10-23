@@ -30,8 +30,23 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
             .HasForeignKey(m => m.ConversationId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.Property(m => m.VersionIndex).HasDefaultValue(1);
+        builder.Property(m => m.IsActive).HasDefaultValue(true);
+        builder.Property(m => m.IsTruncated).HasDefaultValue(false);
+
+        // Self-reference for versions/branches. NO ACTION: SQL Server forbids a second cascade path
+        // (deleting a conversation already cascades to every message).
+        builder.HasOne(m => m.ParentMessage)
+            .WithMany()
+            .HasForeignKey(m => m.ParentMessageId)
+            .OnDelete(DeleteBehavior.NoAction);
+
         // Loading a conversation's messages in order.
         builder.HasIndex(m => new { m.ConversationId, m.CreatedAt })
             .HasDatabaseName("IX_Messages_ConversationId_CreatedAt");
+
+        // Finding a message's versions (siblings) and children.
+        builder.HasIndex(m => new { m.ConversationId, m.ParentMessageId })
+            .HasDatabaseName("IX_Messages_ConversationId_ParentMessageId");
     }
 }

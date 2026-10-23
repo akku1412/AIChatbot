@@ -148,3 +148,21 @@ a short report (passed / failed / not done), docs updated, then your go-ahead fo
 Phase 1 next steps: (1) switch the client to fetch + ReadableStream with AbortController and a 50 ms render throttle,
 (2) `IsTruncated` + "(stopped)", (3) reply versions instead of replacement + `POST /api/messages/{id}/regenerate`,
 (4) edit with full branching (not the simplified fallback), (5) search, (6) pin/archive — one migration for (2)–(6).
+
+## 9. Progress
+
+### Phase 1 — done (Oct 23, 2026)
+
+| # | Feature | Status | Notes |
+|---|---|---|---|
+| 1 | Streaming | ✅ | Client now reads SSE with `fetch` + `ReadableStream` (token refresh + one retry on 401), renders at most every 50 ms; non-streaming endpoint kept. The `done` event carries the saved message ids, the (generated) title in `conversation` and token usage in `assistantMessage.tokenUsage`. |
+| 2 | Stop | ✅ | `IsTruncated` column + "(stopped)" label. Stop = `POST …/stop` (server ends the stream with the saved ids); `AbortController` aborts the fetch as fallback and on logout — `RequestAborted` also saves the partial reply. |
+| 3 | Regenerate | ✅ | `POST /api/messages/{id}/regenerate`; old replies kept as versions (`ParentMessageId`, `VersionIndex`, `IsActive`); "‹ 2/3 ›" arrows via `POST /api/messages/{id}/switch-version`. Old route kept as an alias. |
+| 4 | Edit and resend | ✅ | Full branching (not the simplified fallback): `PUT /api/messages/{id}` creates a sibling question + streamed reply; history follows the active branch only; switching the question back restores the whole original branch. |
+| 5 | Search | ✅ | `GET /api/conversations/search?q=` — LIKE on title and message text (wildcards escaped), owner-only, snippet; 300 ms debounce and highlighted matches in the sidebar. Full-text index not needed yet. |
+| 6 | Pin / archive | ✅ | `IsPinned`, `ArchivedAt`, `PATCH /api/conversations/{id}`, `?archived=true`, Pinned section, ⋯ menu items, Archived view with Unarchive. Pin/archive don't change the recency order. |
+
+- Migration `Phase1ChatExperience` (additive; back-fills `ParentMessageId` for existing messages). Verified on a restored copy of
+  the development database (36 messages, 0 broken chains), then applied to `ChatGPTCloneDB` after a COPY_ONLY backup
+  (`MSSQL\Backup\ChatGPTCloneDB_before_phase1_2026-10-23.bak`).
+- Tests: backend 180 (15 new), frontend 63 (18 new) — all passing; browser run with the real Groq model: 18/18 checks.
