@@ -9,6 +9,7 @@ import {
   ConversationPatch,
   ConversationSearchResult,
   ConversationSummary,
+  FeedbackRating,
   StreamTurnResult,
 } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
@@ -113,6 +114,14 @@ export class ChatStore {
   newChatIn(projectId: number | null): void {
     this.newChatProjectId.set(projectId);
     this.startNewChat();
+  }
+
+  /** Rates an AI reply (null = take the rating back); the thread shows it once the server has saved it. */
+  rateMessage(messageId: number, rating: FeedbackRating | null, comment?: string): Observable<void> {
+    const request$ = rating === null ? this.api.removeRating(messageId) : this.api.rateMessage(messageId, rating, comment).pipe(map(() => undefined));
+    return request$.pipe(
+      tap(() => this.messages.update((list) => list.map((m) => (m.messageId === messageId ? { ...m, feedback: rating } : m)))),
+    );
   }
 
   /** Moves a chat into a project, or back to the main list with null. */

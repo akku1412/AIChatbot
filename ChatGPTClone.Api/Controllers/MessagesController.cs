@@ -19,7 +19,8 @@ public sealed class MessagesController(
     IResponseExportService exports,
     IChatService chat,
     IGenerationRegistry generations,
-    ChatStreamResponder streamer) : ControllerBase
+    ChatStreamResponder streamer,
+    IFeedbackService feedback) : ControllerBase
 {
     /// <summary>
     /// Streams a new version of this AI reply (or a first reply, when the id is a question without one), using the
@@ -101,5 +102,25 @@ public sealed class MessagesController(
         var file = await exports.ExportMessageAsync(User.GetUserId(), messageId, parsed, cancellationToken);
         Response.Headers.CacheControl = "private, no-store";
         return File(file.Content, file.ContentType, file.FileName);
+    }
+
+    /// <summary>Thumbs up or down on one of your AI replies ({ "rating": "up"|"down", "comment"?: string }); replaces any earlier rating.</summary>
+    [HttpPost("{messageId:long}/feedback")]
+    [ProducesResponseType(typeof(MessageFeedbackDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<MessageFeedbackDto>> Rate(long messageId, MessageFeedbackRequest request, CancellationToken cancellationToken) =>
+        Ok(await feedback.RateAsync(User.GetUserId(), messageId, request, cancellationToken));
+
+    /// <summary>Takes your rating back.</summary>
+    [HttpDelete("{messageId:long}/feedback")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RemoveRating(long messageId, CancellationToken cancellationToken)
+    {
+        await feedback.RemoveAsync(User.GetUserId(), messageId, cancellationToken);
+        return NoContent();
     }
 }

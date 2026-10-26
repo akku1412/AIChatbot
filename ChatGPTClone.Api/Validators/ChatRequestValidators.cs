@@ -2,6 +2,7 @@ using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data.Configurations;
 using Microsoft.Extensions.Options;
 using ChatGPTClone.Api.DTOs.Chat;
+using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services.Ai;
 using FluentValidation;
 using static ChatGPTClone.Api.Validators.ChatLimits;
@@ -118,5 +119,16 @@ public sealed class SendMessageRequestValidator : AbstractValidator<SendMessageR
             .WithMessage($"You can attach at most {maxFiles} files to one message.")
             .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
             .WithMessage("Invalid attachment.");
+    }
+}
+
+public sealed class MessageFeedbackRequestValidator : AbstractValidator<MessageFeedbackRequest>
+{
+    public MessageFeedbackRequestValidator()
+    {
+        RuleFor(r => r.Rating).Must(r => r is "up" or "down").WithMessage("Rating must be \"up\" or \"down\".");
+        RuleFor(r => r.Comment)
+            .MaximumLength(MessageFeedback.CommentMaxLength)
+            .WithMessage($"Comment must be {MessageFeedback.CommentMaxLength} characters or fewer.");
     }
 }

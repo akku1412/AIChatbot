@@ -41,6 +41,9 @@ public class Message : IHasCreatedAt
     /// <summary>AI replies: the Ai:Models id that wrote it (for usage and cost reports). Null for user messages.</summary>
     public string? ModelId { get; set; }
 
+    /// <summary>The owner's thumbs up/down on an AI reply, if any.</summary>
+    public MessageFeedback? Feedback { get; set; }
+
     public Message? ParentMessage { get; set; }
 
     public Conversation Conversation { get; set; } = null!;

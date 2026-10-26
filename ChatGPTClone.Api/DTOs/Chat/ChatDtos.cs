@@ -17,10 +17,11 @@ public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSi
 /// Role is serialized lower-case ("user" / "assistant") to match the database and the Angular models.
 /// VersionNumber/VersionCount drive the "‹ 2/3 ›" arrows; IsTruncated means the user stopped the reply.
 /// Sources (AI replies) are the passages it cited as "[file:ChunkId]" that were really in its prompt (invented ids are dropped).
+/// Feedback (AI replies): the owner's rating, "up", "down" or null.
 /// </summary>
 public sealed record MessageDto(long MessageId, string Role, string Content, DateTime CreatedAt, int? TokenUsage,
     IReadOnlyList<AttachmentDto> Attachments, long? ParentMessageId, int VersionNumber, int VersionCount, bool IsTruncated,
-    IReadOnlyList<SourceDto> Sources)
+    IReadOnlyList<SourceDto> Sources, string? Feedback = null)
 {
     public static MessageDto From(Message m, int versionNumber = 1, int versionCount = 1) =>
         new(m.MessageId, m.Role.ToString().ToLowerInvariant(), m.Content, m.CreatedAt, m.TokenUsage,
@@ -33,7 +34,8 @@ public sealed record MessageDto(long MessageId, string Role, string Content, Dat
                 .Where(s => s.Chunk?.File is not null)
                 .OrderByDescending(s => s.Score)
                 .Select(s => new SourceDto(s.ChunkId, s.Chunk.FileId, s.Chunk.File.OriginalFileName, s.Chunk.Location, s.Chunk.Source == ChunkSource.Ocr))
-                .ToList());
+                .ToList(),
+            m.Feedback is null ? null : m.Feedback.Rating > 0 ? "up" : "down");
 }
 
 /// <summary>Oldest-first page of messages; HasMore means older messages exist (use "before").</summary>
@@ -115,3 +117,9 @@ public sealed record EditMessageRequest(string Content);
 
 /// <summary>Show another version of a message (1-based, as in "2/3").</summary>
 public sealed record SwitchVersionRequest(int VersionNumber);
+
+/// <summary>POST /api/messages/{id}/feedback: "up" or "down", plus an optional comment (mostly for "down").</summary>
+public sealed record MessageFeedbackRequest(string Rating, string? Comment);
+
+/// <summary>The saved rating.</summary>
+public sealed record MessageFeedbackDto(string Rating, string? Comment);

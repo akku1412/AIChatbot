@@ -852,3 +852,66 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026092410_Phase3MessageFeedback'
+)
+BEGIN
+    CREATE TABLE [MessageFeedback] (
+        [MessageFeedbackId] int NOT NULL IDENTITY,
+        [MessageId] bigint NOT NULL,
+        [UserId] int NOT NULL,
+        [Rating] smallint NOT NULL,
+        [Comment] nvarchar(1000) NULL,
+        [CreatedAt] datetime2(3) NOT NULL,
+        [UpdatedAt] datetime2(3) NOT NULL,
+        CONSTRAINT [PK_MessageFeedback] PRIMARY KEY ([MessageFeedbackId]),
+        CONSTRAINT [CK_MessageFeedback_Rating] CHECK ([Rating] IN (-1, 1)),
+        CONSTRAINT [FK_MessageFeedback_Messages_MessageId] FOREIGN KEY ([MessageId]) REFERENCES [Messages] ([MessageId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026092410_Phase3MessageFeedback'
+)
+BEGIN
+    CREATE INDEX [IX_MessageFeedback_CreatedAt] ON [MessageFeedback] ([CreatedAt]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026092410_Phase3MessageFeedback'
+)
+BEGIN
+    CREATE INDEX [IX_MessageFeedback_UserId_CreatedAt] ON [MessageFeedback] ([UserId], [CreatedAt]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026092410_Phase3MessageFeedback'
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_MessageFeedback_MessageId] ON [MessageFeedback] ([MessageId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026092410_Phase3MessageFeedback'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261026092410_Phase3MessageFeedback', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+

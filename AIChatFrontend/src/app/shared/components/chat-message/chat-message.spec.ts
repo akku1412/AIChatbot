@@ -228,6 +228,63 @@ describe('ChatMessageView', () => {
     expect((await render(reply)).querySelector('[aria-label="Sources"]')).toBeNull(); // no sources, no row
   });
 
+  describe('thumbs up/down', () => {
+    const thumb = (el: HTMLElement, label: 'Good response' | 'Bad response') =>
+      el.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
+
+    it('emits up, and up again takes it back', async () => {
+      const el = await render({ ...reply, feedback: null });
+      const rated: unknown[] = [];
+      fixture.componentInstance.rate.subscribe((r) => rated.push(r));
+
+      thumb(el, 'Good response').click();
+      fixture.componentRef.setInput('message', { ...reply, feedback: 'up' });
+      fixture.detectChanges();
+      expect(thumb(el, 'Good response').getAttribute('aria-pressed')).toBe('true');
+      thumb(el, 'Good response').click();
+
+      expect(rated).toEqual([{ rating: 'up' }, { rating: null }]);
+    });
+
+    it('down is saved at once and offers an optional comment', async () => {
+      const el = await render({ ...reply, feedback: null });
+      const rated: unknown[] = [];
+      fixture.componentInstance.rate.subscribe((r) => rated.push(r));
+
+      thumb(el, 'Bad response').click();
+      fixture.detectChanges();
+      expect(rated).toEqual([{ rating: 'down' }]);
+      const box = el.querySelector('.feedback textarea') as HTMLTextAreaElement;
+      expect(box).not.toBeNull();
+
+      box.value = '  Wrong year  ';
+      box.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+      (el.querySelector('.feedback button[type="submit"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+
+      expect(rated).toEqual([{ rating: 'down' }, { rating: 'down', comment: 'Wrong year' }]);
+      expect(el.querySelector('.feedback')).toBeNull();
+    });
+
+    it('Skip closes the comment box without sending more', async () => {
+      const el = await render({ ...reply, feedback: null });
+      const rated: unknown[] = [];
+      fixture.componentInstance.rate.subscribe((r) => rated.push(r));
+      thumb(el, 'Bad response').click();
+      fixture.detectChanges();
+      (Array.from(el.querySelectorAll('.feedback button')).find((b) => b.textContent?.trim() === 'Skip') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(el.querySelector('.feedback')).toBeNull();
+      expect(rated).toEqual([{ rating: 'down' }]);
+    });
+
+    it('is not offered on a reply that is still being created', async () => {
+      const el = await render({ ...reply, messageId: -3 });
+      expect(thumb(el, 'Good response')).toBeNull();
+    });
+  });
+
   it('reads a reply aloud and stops it again', async () => {
     const readAloud = TestBed.inject(ReadAloudService);
     vi.spyOn(readAloud, 'supported', 'get').mockReturnValue(true);

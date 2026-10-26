@@ -10,6 +10,7 @@ import {
   ConversationSearchResult,
   ConversationSummary,
   ExportFormat,
+  FeedbackRating,
   MessagePage,
   PagedResult,
   SendMessageResponse,
@@ -75,6 +76,18 @@ export class ChatApiService {
   /** The public snapshot behind a share link (no sign-in needed). */
   getSharedConversation(token: string): Observable<SharedConversation> {
     return this.http.get<SharedConversation>(`${environment.apiBaseUrl}/share/${encodeURIComponent(token)}`);
+  }
+
+  /** Thumbs up/down on an AI reply (replaces an earlier rating); a comment is optional. */
+  rateMessage(messageId: number, rating: FeedbackRating, comment?: string): Observable<{ rating: FeedbackRating; comment: string | null }> {
+    return this.http.post<{ rating: FeedbackRating; comment: string | null }>(`${this.messagesUrl}/${messageId}/feedback`, {
+      rating,
+      comment: comment ?? null,
+    });
+  }
+
+  removeRating(messageId: number): Observable<void> {
+    return this.http.delete<void>(`${this.messagesUrl}/${messageId}/feedback`);
   }
 
   /** Moves a chat into a project, or back to the main list with null. */

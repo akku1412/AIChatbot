@@ -24,6 +24,8 @@ describe('ChatStore', () => {
     createConversation: vi.fn(),
     listConversations: vi.fn(),
     moveConversation: vi.fn(),
+    rateMessage: vi.fn(),
+    removeRating: vi.fn(),
     deleteConversation: vi.fn(() => of(undefined)),
   };
 
@@ -119,6 +121,29 @@ describe('ChatStore', () => {
       api.patchConversation.mockReturnValue(of(inProject(5, 3, { archivedAt: '2026-10-26T00:00:00Z' })));
       store.setArchived(inProject(5, 3), true).subscribe();
       expect(store.projectConversations()[3]).toEqual([]);
+    });
+  });
+
+  describe('feedback', () => {
+    it('shows the rating on the reply once the server saved it, and can take it back', () => {
+      store.messages.set([msg(10, 'user', 'q'), msg(11, 'assistant', 'a')]);
+      api.rateMessage.mockReturnValue(of({ rating: 'down', comment: 'too long' }));
+      api.removeRating.mockReturnValue(of(undefined));
+
+      store.rateMessage(11, 'down', 'too long').subscribe();
+      expect(api.rateMessage).toHaveBeenCalledWith(11, 'down', 'too long');
+      expect(store.messages()[1]?.feedback).toBe('down');
+
+      store.rateMessage(11, null).subscribe();
+      expect(api.removeRating).toHaveBeenCalledWith(11);
+      expect(store.messages()[1]?.feedback).toBeNull();
+    });
+
+    it('leaves the reply unchanged when saving fails', () => {
+      store.messages.set([msg(11, 'assistant', 'a')]);
+      api.rateMessage.mockReturnValue(throwError(() => new Error('offline')));
+      store.rateMessage(11, 'up').subscribe({ error: () => undefined });
+      expect(store.messages()[0]?.feedback).toBeUndefined();
     });
   });
 

@@ -147,7 +147,11 @@ export interface ChatMessage {
   isTruncated: boolean;
   /** AI replies: the document passages it cited as [file:chunkId] (only real, owned passages; best match first). */
   sources?: MessageSource[];
+  /** AI replies: the owner's thumbs up/down. */
+  feedback?: FeedbackRating | null;
 }
+
+export type FeedbackRating = 'up' | 'down';
 
 /** A passage an AI reply cites. */
 export interface MessageSource {

@@ -126,6 +126,7 @@ builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ISharingService, SharingService>();
+builder.Services.AddScoped<IFeedbackService, FeedbackService>();
 // "Search the web": Tavily over HTTPS; the key stays on the server (WebSearch:ApiKey in user secrets).
 builder.Services.AddHttpClient<IWebSearchProvider, TavilyWebSearchProvider>();
 // Voice input: speech-to-text over the OpenAI audio API (OpenAI or Groq), configured under Ai:Transcription.

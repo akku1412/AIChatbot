@@ -7,7 +7,7 @@ import { ChatStore } from '../../core/services/chat.store';
 import { ProjectService } from '../../core/services/project.service';
 import { SourcePreviewService } from '../../core/services/source-preview.service';
 import { AppLogo } from '../../shared/components/app-logo/app-logo';
-import { ChatMessageView } from '../../shared/components/chat-message/chat-message';
+import { ChatMessageView, RateRequest } from '../../shared/components/chat-message/chat-message';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 import { ComposerSubmit, MessageInput } from '../../shared/components/message-input/message-input';
 import { SourcePanel } from '../../shared/components/source-panel/source-panel';
@@ -122,6 +122,17 @@ export class ChatThread {
   protected edit(messageId: number, content: string): void {
     this.store.editMessage(messageId, content).subscribe({
       error: (err: unknown) => this.notifications.error(`Your edited message wasn't sent. ${errorMessage(err)}`),
+    });
+  }
+
+  protected rate(messageId: number, { rating, comment }: RateRequest): void {
+    this.store.rateMessage(messageId, rating, comment).subscribe({
+      next: () => {
+        if (comment) {
+          this.notifications.success('Thanks for the feedback.');
+        }
+      },
+      error: (err: unknown) => this.notifications.error(`Couldn't save your feedback. ${errorMessage(err)}`),
     });
   }
 

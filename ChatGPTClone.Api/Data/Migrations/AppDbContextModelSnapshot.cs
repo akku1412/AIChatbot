@@ -242,6 +242,51 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.ToTable("MessageAttachments", (string)null);
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.MessageFeedback", b =>
+                {
+                    b.Property<int>("MessageFeedbackId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MessageFeedbackId"));
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("MessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<short>("Rating")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("MessageFeedbackId");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_MessageFeedback_CreatedAt");
+
+                    b.HasIndex("MessageId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_MessageFeedback_MessageId");
+
+                    b.HasIndex("UserId", "CreatedAt")
+                        .HasDatabaseName("IX_MessageFeedback_UserId_CreatedAt");
+
+                    b.ToTable("MessageFeedback", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_MessageFeedback_Rating", "[Rating] IN (-1, 1)");
+                        });
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.MessageSource", b =>
                 {
                     b.Property<long>("MessageSourceId")
@@ -689,6 +734,17 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("Message");
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.MessageFeedback", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.Message", "Message")
+                        .WithOne("Feedback")
+                        .HasForeignKey("ChatGPTClone.Api.Models.MessageFeedback", "MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.MessageSource", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.DocumentChunk", "Chunk")
@@ -795,6 +851,8 @@ namespace ChatGPTClone.Api.Data.Migrations
             modelBuilder.Entity("ChatGPTClone.Api.Models.Message", b =>
                 {
                     b.Navigation("Attachments");
+
+                    b.Navigation("Feedback");
 
                     b.Navigation("Sources");
                 });

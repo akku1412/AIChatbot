@@ -2,7 +2,14 @@ import { Component, DestroyRef, ElementRef, computed, inject, input, output, sig
 import { finalize } from 'rxjs';
 
 import { errorMessage } from '../../../core/http/api-error';
-import { AttachmentInfo, ChatMessage, ExportFormat, MAX_MESSAGE_LENGTH, MessageSource } from '../../../core/models/chat.models';
+import {
+  AttachmentInfo,
+  ChatMessage,
+  ExportFormat,
+  FeedbackRating,
+  MAX_MESSAGE_LENGTH,
+  MessageSource,
+} from '../../../core/models/chat.models';
 import { ChatApiService } from '../../../core/services/chat-api.service';
 import { safeFileName, saveResponse } from '../../../core/services/download';
 import { FileApiService } from '../../../core/services/file-api.service';
@@ -14,6 +21,12 @@ import { AttachmentChip } from '../attachment-chip/attachment-chip';
 import { MarkdownView } from '../markdown/markdown';
 import { NotificationService } from '../toast/notification.service';
 import { VersionSwitcher } from '../version-switcher/version-switcher';
+
+/** What a reply's thumbs buttons ask for. */
+export interface RateRequest {
+  rating: FeedbackRating | null;
+  comment?: string;
+}
 
 interface ExportOption {
   format: ExportFormat;
@@ -171,6 +184,19 @@ interface ExportOption {
               </button>
             }
 
+            @if (message().messageId > 0) {
+              <button type="button" class="action icon-only" [class.chosen]="message().feedback === 'up'"
+                      [attr.aria-pressed]="message().feedback === 'up'" aria-label="Good response" title="Good response"
+                      (click)="rateUp()">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 11v9H4v-9zM7 11l4-7a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 20H7" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </button>
+              <button type="button" class="action icon-only" [class.chosen]="message().feedback === 'down'"
+                      [attr.aria-pressed]="message().feedback === 'down'" aria-label="Bad response" title="Bad response"
+                      (click)="rateDown()">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M17 13V4h3v9zM17 13l-4 7a2 2 0 0 1-2-2v-4H6a2 2 0 0 1-2-2.3l1.2-6A2 2 0 0 1 7.2 4H17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </button>
+            }
+
             @if (canRegenerate()) {
               <button type="button" class="action" (click)="regenerate.emit()" aria-label="Regenerate response" title="Regenerate response">
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -213,6 +239,18 @@ interface ExportOption {
               }
             </div>
           </div>
+          @if (feedbackOpen()) {
+            <form class="feedback" (submit)="$event.preventDefault(); sendComment()">
+              <label for="feedback-{{ message().messageId }}">What went wrong? (optional)</label>
+              <textarea id="feedback-{{ message().messageId }}" rows="2" [attr.maxlength]="commentMax" [value]="comment()"
+                        (input)="comment.set($any($event.target).value)" (keydown.escape)="feedbackOpen.set(false)"
+                        placeholder="e.g. it was wrong about…, too long, didn't answer the question"></textarea>
+              <div class="feedback-actions">
+                <button type="button" class="action" (click)="feedbackOpen.set(false)">Skip</button>
+                <button type="submit" class="action primary-action" [disabled]="!comment().trim()">Send</button>
+              </div>
+            </form>
+          }
         }
       </div>
     </article>
@@ -284,6 +322,19 @@ interface ExportOption {
       display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px;
       border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.8125rem; cursor: pointer;
     }
+    .action.chosen { color: var(--accent); }
+    .feedback {
+      display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 10px 12px; max-width: 520px;
+      border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised);
+    }
+    .feedback label { font-size: 0.8125rem; font-weight: 600; }
+    .feedback textarea {
+      width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text); font: inherit; font-size: 0.875rem; resize: vertical;
+    }
+    .feedback-actions { display: flex; justify-content: flex-end; gap: 6px; }
+    .primary-action { color: var(--accent); font-weight: 600; }
+    .primary-action:disabled { opacity: 0.5; cursor: not-allowed; }
     .action:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
     .action:disabled { cursor: progress; color: var(--accent); }
     .export { position: relative; }
@@ -328,6 +379,37 @@ export class ChatMessageView {
   protected readonly speaking = computed(() => this.readAloud.speakingId() === this.message().messageId);
   /** Switching chats (or deleting this reply) stops reading it. */
   private readonly stopReadingOnLeave = inject(DestroyRef).onDestroy(() => this.speaking() && this.readAloud.stop());
+
+  protected readonly commentMax = 1000;
+  /** The "What went wrong?" box after a thumbs down. */
+  protected readonly feedbackOpen = signal(false);
+  protected readonly comment = signal('');
+
+  /** 👍 again takes it back. */
+  protected rateUp(): void {
+    this.feedbackOpen.set(false);
+    this.rate.emit({ rating: this.message().feedback === 'up' ? null : 'up' });
+  }
+
+  /** 👎 is saved at once; the comment box is optional. 👎 again takes it back. */
+  protected rateDown(): void {
+    if (this.message().feedback === 'down') {
+      this.feedbackOpen.set(false);
+      this.rate.emit({ rating: null });
+      return;
+    }
+    this.rate.emit({ rating: 'down' });
+    this.comment.set('');
+    this.feedbackOpen.set(true);
+  }
+
+  protected sendComment(): void {
+    const comment = this.comment().trim();
+    if (comment) {
+      this.rate.emit({ rating: 'down', comment });
+    }
+    this.feedbackOpen.set(false);
+  }
 
   protected toggleReadAloud(): void {
     if (this.speaking()) {
@@ -374,6 +456,8 @@ export class ChatMessageView {
   readonly edit = output<string>();
   /** Show this version (1-based) of the message. */
   readonly switchVersion = output<number>();
+  /** Thumbs up/down (null = take the rating back), with an optional comment. */
+  readonly rate = output<RateRequest>();
 
   protected readonly maxLength = MAX_MESSAGE_LENGTH;
   protected readonly editing = signal(false);
