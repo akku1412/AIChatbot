@@ -44,4 +44,12 @@ public sealed class FileUploadOptions
     /// <summary>Earlier attachments in the same conversation stay available for follow-up questions, up to this many files.</summary>
     [Range(1, 20)]
     public int MaxFilesInContext { get; init; } = 5;
+
+    /// <summary>Uploads never sent with a message (nor shared with a project) are deleted after this many hours. 0 = never.</summary>
+    [Range(0, 24 * 30)]
+    public int AbandonedUploadRetentionHours { get; init; } = 24;
+
+    /// <summary>How often the cleanup runs.</summary>
+    [Range(1, 24 * 60)]
+    public int CleanupIntervalMinutes { get; init; } = 60;
 }

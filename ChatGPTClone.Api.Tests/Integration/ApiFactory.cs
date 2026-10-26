@@ -13,6 +13,7 @@ using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Services.Audio;
 using ChatGPTClone.Api.Services.Web;
 using ChatGPTClone.Api.Services.Embeddings;
+using ChatGPTClone.Api.Services.Files;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -37,6 +38,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public FakeAiProvider Ai { get; } = new();
     public FakeWebSearch WebSearch { get; } = new();
     public FakeSpeechToText Speech { get; } = new();
+    public FakeMalwareScanner Scanner { get; } = new();
 
     /// <summary>Private upload folder for this test run (deleted afterwards).</summary>
     public string StoragePath { get; } = Path.Combine(Path.GetTempPath(), "chatgptclone-tests-" + Guid.NewGuid().ToString("N"));
@@ -83,6 +85,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IAiProviderFactory>(new FakeAiProviderFactory(Ai));
             services.AddSingleton<IWebSearchProvider>(WebSearch);
             services.AddSingleton<ISpeechToText>(Speech);
+            services.AddSingleton<IMalwareScanner>(Scanner);
             // The real 118 MB model is exercised by RetrievalQualityTests only; everything else uses this fake.
             services.AddSingleton<IEmbeddingProvider>(Embeddings);
         });
@@ -463,4 +466,27 @@ public sealed class FakeSpeechToText : ISpeechToText
         FailWith = null;
         Calls.Clear();
     }
+}
+
+/// <summary>"Infected" when the file contains the EICAR test marker; can be switched to "scanner unreachable".</summary>
+public sealed class FakeMalwareScanner : IMalwareScanner
+{
+    public const string Marker = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE";
+    public bool Enabled => true;
+    public bool Unavailable { get; set; }
+    public int Scans { get; private set; }
+
+    public async Task<ScanResult> ScanAsync(Stream content, CancellationToken cancellationToken)
+    {
+        Scans++;
+        if (Unavailable)
+        {
+            throw new MalwareScanUnavailableException("simulated: clamd down");
+        }
+        using var reader = new StreamReader(content, leaveOpen: true);
+        var text = await reader.ReadToEndAsync(cancellationToken);
+        return text.Contains(Marker, StringComparison.Ordinal) ? new ScanResult(true, "Eicar-Test-Signature") : ScanResult.Clean;
+    }
+
+    public void Reset() => Unavailable = false;
 }

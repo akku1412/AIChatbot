@@ -254,11 +254,9 @@ public sealed class DocumentProcessor(
             }
         });
 
-        var work = Task.Run(() =>
-        {
-            using var stream = storage.OpenRead(file.StorageKey);
-            return extractor.Extract(stream, file.FileExtension, limits);
-        }, cancellationToken);
+        // Opened here (cloud stores download it); the CPU-bound extraction runs on a worker thread.
+        await using var stream = await storage.OpenReadAsync(file.StorageKey, cancellationToken);
+        var work = Task.Run(() => extractor.Extract(stream, file.FileExtension, limits), cancellationToken);
 
         (int, int) saved = (0, 0);
         while (!work.IsCompleted)

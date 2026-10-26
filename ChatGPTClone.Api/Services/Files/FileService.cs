@@ -22,6 +22,12 @@ public interface IFileService
 
     Task DeleteAsync(int userId, Guid fileId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Deletes up to <paramref name="batchSize"/> files uploaded before the cutoff that were never attached to a message
+    /// or shared with a project (with their chunks and stored bytes). Returns how many were deleted.
+    /// </summary>
+    Task<int> DeleteAbandonedAsync(DateTime uploadedBeforeUtc, int batchSize, CancellationToken cancellationToken);
+
     /// <summary>The original bytes of the user's file, with its original name and verified content type. 404 otherwise.</summary>
     Task<FileDownload> OpenDownloadAsync(int userId, Guid fileId, CancellationToken cancellationToken);
 
@@ -42,6 +48,8 @@ public sealed class FileService(
     IFileStorage storage,
     IDocumentProcessingQueue queue,
     IOptions<FileUploadOptions> options,
+    IMalwareScanner scanner,
+    IOptions<MalwareScanOptions> scanOptions,
     ILogger<FileService> logger) : IFileService
 {
     private readonly FileUploadOptions _options = options.Value;
@@ -91,6 +99,10 @@ public sealed class FileService(
         {
             throw Problem(415, "Invalid file", $"{mismatch} Make sure the file isn't damaged or renamed.", "invalid_format");
         }
+
+        // ---- Virus scan before anything is stored: an infected file never reaches storage ----
+        await ScanAsync(bytes, displayName, userId, cancellationToken);
+        bytes.Position = 0;
 
         Stream toStore = bytes;
         if (isImage)
@@ -151,7 +163,61 @@ public sealed class FileService(
     public async Task DeleteAsync(int userId, Guid fileId, CancellationToken cancellationToken)
     {
         var file = await GetOwnedAsync(userId, fileId, cancellationToken);
+        await RemoveAsync(file, cancellationToken);
+        logger.LogInformation("File {FileId} deleted by user {UserId}", fileId, userId);
+    }
 
+    public async Task<int> DeleteAbandonedAsync(DateTime uploadedBeforeUtc, int batchSize, CancellationToken cancellationToken)
+    {
+        // Never sent with a message and not shared with a project: an upload the user removed from the composer
+        // without us hearing about it, or left behind when they closed the tab.
+        var abandoned = await db.UploadedFiles
+            .Where(f => f.CreatedAt < uploadedBeforeUtc
+                && !db.MessageAttachments.Any(a => a.FileId == f.FileId)
+                && !db.ProjectFiles.Any(pf => pf.FileId == f.FileId))
+            .OrderBy(f => f.CreatedAt)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+        foreach (var file in abandoned)
+        {
+            await RemoveAsync(file, cancellationToken);
+        }
+        return abandoned.Count;
+    }
+
+    /// <summary>422 for malware; 503 when the scanner can't answer and MalwareScan:FailClosed is on (the default).</summary>
+    private async Task ScanAsync(MemoryStream bytes, string fileName, int userId, CancellationToken cancellationToken)
+    {
+        if (!scanner.Enabled)
+        {
+            return;
+        }
+        try
+        {
+            bytes.Position = 0;
+            var result = await scanner.ScanAsync(bytes, cancellationToken);
+            if (result.Infected)
+            {
+                logger.LogWarning("Upload by user {UserId} rejected: malware {Threat} detected", userId, result.Threat);
+                throw Problem(422, "File rejected", $"\"{fileName}\" looks harmful ({result.Threat}), so it wasn't saved.", "malware_detected");
+            }
+        }
+        catch (MalwareScanUnavailableException ex)
+        {
+            if (scanOptions.Value.FailClosed)
+            {
+                logger.LogError(ex, "Virus scan unavailable; upload refused (MalwareScan:FailClosed)");
+                throw Problem(503, "Couldn't check the file",
+                    "We couldn't check this file for viruses right now. Please try again in a moment.", "scan_unavailable");
+            }
+            logger.LogWarning(ex, "Virus scan unavailable; upload accepted unchecked (MalwareScan:FailClosed = false)");
+        }
+    }
+
+    /// <summary>Deletes a file's links, record, extracted text and stored bytes.</summary>
+    private async Task RemoveAsync(UploadedFile file, CancellationToken cancellationToken)
+    {
+        var fileId = file.FileId;
         // Attachment, citation and project links use NO ACTION (SQL Server multiple-cascade-path rule), so remove them first.
         await db.MessageAttachments.Where(a => a.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
         await db.MessageSources.Where(s => s.Chunk.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
@@ -168,7 +234,6 @@ public sealed class FileService(
             // Metadata is gone, so the orphaned blob is unreachable; log for cleanup.
             logger.LogWarning(ex, "Could not delete stored blob for file {FileId}", fileId);
         }
-        logger.LogInformation("File {FileId} deleted by user {UserId}", fileId, userId);
     }
 
     public async Task<ChunkDto> GetChunkAsync(int userId, Guid fileId, long chunkId, CancellationToken cancellationToken)
@@ -218,7 +283,7 @@ public sealed class FileService(
         try
         {
             // Name and type come from our own records (sanitized at upload / verified from the bytes), never from the request.
-            return new FileDownload(storage.OpenRead(file.StorageKey), file.ContentType, file.OriginalFileName, file.FileSize);
+            return new FileDownload(await storage.OpenReadAsync(file.StorageKey, cancellationToken), file.ContentType, file.OriginalFileName, file.FileSize);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {

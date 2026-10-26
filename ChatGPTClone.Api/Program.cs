@@ -68,6 +68,10 @@ builder.Services.AddOptions<EmbeddingOptions>()
     .ValidateDataAnnotations()
     .Validate(o => o.Provider is "Local" or "OpenAI" or "None", "Embeddings:Provider must be Local, OpenAI or None.")
     .ValidateOnStart();
+builder.Services.AddOptions<MalwareScanOptions>()
+    .Bind(builder.Configuration.GetSection(MalwareScanOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 builder.Services.AddOptions<WebSearchOptions>()
     .Bind(builder.Configuration.GetSection(WebSearchOptions.SectionName))
     .ValidateDataAnnotations()
@@ -150,7 +154,59 @@ builder.Services.AddScoped<IResponseExportService, ResponseExportService>();
 
 // Documents: private storage, format-specific text extractors (OCR for scans and images), upload/ownership logic,
 // background processing (extract → chunk → embed) and hybrid AI context retrieval.
-builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+// Where uploads live: "FileStorage:Provider" = Local (default), AzureBlob or S3. Always private.
+var storageOptions = builder.Configuration.GetSection(FileStorageOptions.SectionName).Get<FileStorageOptions>() ?? new FileStorageOptions();
+switch (storageOptions.Provider)
+{
+    case "Local":
+        builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+        break;
+    case "AzureBlob":
+        if (string.IsNullOrWhiteSpace(storageOptions.AzureBlob.ConnectionString))
+        {
+            throw new InvalidOperationException("FileStorage:AzureBlob:ConnectionString is required when FileStorage:Provider is AzureBlob.");
+        }
+        builder.Services.AddSingleton<IFileStorage>(sp => new AzureBlobFileStorage(
+            new Azure.Storage.Blobs.BlobContainerClient(storageOptions.AzureBlob.ConnectionString, storageOptions.AzureBlob.Container),
+            sp.GetRequiredService<ILogger<AzureBlobFileStorage>>()));
+        break;
+    case "S3":
+        if (string.IsNullOrWhiteSpace(storageOptions.S3.Bucket))
+        {
+            throw new InvalidOperationException("FileStorage:S3:Bucket is required when FileStorage:Provider is S3.");
+        }
+        builder.Services.AddSingleton<IFileStorage>(_ =>
+        {
+            var s3 = storageOptions.S3;
+            var config = new Amazon.S3.AmazonS3Config();
+            if (!string.IsNullOrWhiteSpace(s3.ServiceUrl))
+            {
+                config.ServiceURL = s3.ServiceUrl;
+                config.ForcePathStyle = true; // MinIO and most S3-compatible stores
+            }
+            else if (!string.IsNullOrWhiteSpace(s3.Region))
+            {
+                config.RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(s3.Region);
+            }
+            var client = string.IsNullOrWhiteSpace(s3.AccessKeyId)
+                ? new Amazon.S3.AmazonS3Client(config) // default AWS credentials (environment, profile, instance role)
+                : new Amazon.S3.AmazonS3Client(s3.AccessKeyId, s3.SecretAccessKey, config);
+            return new S3FileStorage(client, s3.Bucket!);
+        });
+        break;
+    default:
+        throw new InvalidOperationException($"FileStorage:Provider '{storageOptions.Provider}' is not supported (use Local, AzureBlob or S3).");
+}
+
+// Virus scan of every upload before it is stored (ClamAV), when MalwareScan:Enabled.
+if (builder.Configuration.GetValue<bool>($"{MalwareScanOptions.SectionName}:Enabled"))
+{
+    builder.Services.AddSingleton<IMalwareScanner, ClamAvScanner>();
+}
+else
+{
+    builder.Services.AddSingleton<IMalwareScanner, DisabledMalwareScanner>();
+}
 builder.Services.AddSingleton<IOcrEngine, TesseractOcrEngine>();
 builder.Services.AddSingleton<IDocumentExtractor>(sp =>
     new PdfExtractor(sp.GetRequiredService<IOcrEngine>(), sp.GetRequiredService<IOptions<OcrOptions>>()));
@@ -170,6 +226,9 @@ builder.Services.AddSingleton<IEmbeddingProvider>(sp =>
 builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
 builder.Services.AddScoped<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddHostedService<DocumentProcessingWorker>();
+// Hourly: deletes uploads that were never sent with a message or shared with a project (FileUploads:AbandonedUpload…).
+builder.Services.AddSingleton<UploadCleanupWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UploadCleanupWorker>());
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IDocumentContextBuilder, DocumentContextBuilder>();
 builder.Services.AddScoped<UploadSizeLimitFilter>();

@@ -4,14 +4,20 @@ using Microsoft.Extensions.Options;
 
 namespace ChatGPTClone.Api.Services.Files;
 
-/// <summary>Private binary storage for uploads. Swap for a cloud implementation (e.g. Azure Blob) in production.</summary>
+/// <summary>
+/// Private binary storage for uploads: local disk (development), Azure Blob Storage or Amazon S3, chosen by
+/// FileStorage:Provider. Nothing is ever public: downloads stream through the API after the ownership check.
+/// Keys are server-made ("{32 hex}.bin") and validated by every implementation.
+/// </summary>
 public interface IFileStorage
 {
-    /// <summary>Streams the content to a new, server-named file and returns its storage key.</summary>
+    /// <summary>Streams the content to a new, server-named object and returns its storage key.</summary>
     Task<string> SaveAsync(Stream content, CancellationToken cancellationToken);
 
-    Stream OpenRead(string storageKey);
+    /// <summary>A readable, seekable stream (the caller disposes it). Throws FileNotFoundException when it is gone.</summary>
+    Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken);
 
+    /// <summary>Deletes the object; missing objects are not an error.</summary>
     Task DeleteAsync(string storageKey);
 }
 
@@ -19,7 +25,7 @@ public interface IFileStorage
 /// Stores files on local disk in a folder outside wwwroot, under random names ("{guid}.bin").
 /// Keys are validated against a strict pattern before any path is built, so path traversal is impossible.
 /// </summary>
-public sealed partial class LocalFileStorage : IFileStorage
+public sealed class LocalFileStorage : IFileStorage
 {
     private readonly string _root;
 
@@ -41,7 +47,7 @@ public sealed partial class LocalFileStorage : IFileStorage
 
     public async Task<string> SaveAsync(Stream content, CancellationToken cancellationToken)
     {
-        var key = $"{Guid.NewGuid():N}.bin";
+        var key = StorageKeys.New();
         var path = PathFor(key);
         try
         {
@@ -57,8 +63,8 @@ public sealed partial class LocalFileStorage : IFileStorage
         return key;
     }
 
-    public Stream OpenRead(string storageKey) =>
-        new FileStream(PathFor(storageKey), FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920);
+    public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken) =>
+        Task.FromResult<Stream>(new FileStream(PathFor(storageKey), FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920));
 
     public Task DeleteAsync(string storageKey)
     {
@@ -89,6 +95,22 @@ public sealed partial class LocalFileStorage : IFileStorage
         }
     }
 
+    private static Regex KeyPattern() => StorageKeys.Pattern();
+}
+
+/// <summary>Storage keys are made by the server: 32 hex characters + ".bin". Every store refuses anything else.</summary>
+public static partial class StorageKeys
+{
+    public static string New() => $"{Guid.NewGuid():N}.bin";
+
+    public static void Validate(string storageKey)
+    {
+        if (!Pattern().IsMatch(storageKey))
+        {
+            throw new ArgumentException("Invalid storage key.", nameof(storageKey));
+        }
+    }
+
     [GeneratedRegex("^[a-f0-9]{32}\\.bin$")]
-    private static partial Regex KeyPattern();
+    public static partial Regex Pattern();
 }

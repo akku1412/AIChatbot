@@ -402,7 +402,7 @@ public sealed class ChatService(
         {
             try
             {
-                await using var stream = fileStorage.OpenRead(file.StorageKey);
+                await using var stream = await fileStorage.OpenReadAsync(file.StorageKey, cancellationToken);
                 using var buffer = new MemoryStream();
                 await stream.CopyToAsync(buffer, cancellationToken);
                 images.Add(new AiImage(buffer.ToArray(), file.ContentType));
