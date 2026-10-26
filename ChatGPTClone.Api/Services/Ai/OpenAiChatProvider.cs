@@ -252,7 +252,8 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         return new AiProviderException(kind, $"{Name} request failed with HTTP {ex.Status}.", ex);
     }
 
-    private static AiFailureKind Classify(ClientResultException ex) =>
+    /// <summary>A provider HTTP error as a failure kind (also used for transcription).</summary>
+    internal static AiFailureKind Classify(ClientResultException ex) =>
         ex.Status switch
         {
             401 or 403 => AiFailureKind.InvalidCredentials,

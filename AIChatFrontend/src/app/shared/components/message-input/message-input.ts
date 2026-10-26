@@ -5,6 +5,7 @@ import {
   ElementRef,
   computed,
   effect,
+  untracked,
   inject,
   input,
   model,
@@ -25,6 +26,7 @@ import {
 import { FileApiService, isProcessing, processingLabel } from '../../../core/services/file-api.service';
 import { ImagePreviewService, createObjectUrl, revokeObjectUrl } from '../../../core/services/image-preview.service';
 import { ModelService } from '../../../core/services/model.service';
+import { MAX_RECORDING_SECONDS, VoiceInputError, VoiceRecorderService } from '../../../core/services/voice-recorder.service';
 import { AttachmentChip, ChipState, formatFileSize } from '../attachment-chip/attachment-chip';
 import { NotificationService } from '../toast/notification.service';
 
@@ -65,6 +67,7 @@ interface PendingAttachment {
     '(dragover)': 'onDragOver($event)',
     '(dragleave)': 'onDragLeave($event)',
     '(drop)': 'onDrop($event)',
+    '(document:keydown.escape)': 'onEscape()',
   },
   templateUrl: './message-input.html',
   styleUrl: './message-input.css',
@@ -95,6 +98,13 @@ export class MessageInput {
   protected readonly webSearchAvailable = this.models.webSearchAvailable;
   /** "Search the web" for the next message (off again after it is sent). */
   protected readonly webSearch = signal(false);
+  protected readonly recorder = inject(VoiceRecorderService);
+  /** Shown when the server has speech-to-text and this browser can record. */
+  protected readonly voiceAvailable = computed(() => this.models.voiceInputAvailable() && this.recorder.supported);
+  protected readonly recordingTime = computed(() => {
+    const s = this.recorder.seconds();
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  });
 
   protected readonly remaining = computed(() => MAX_MESSAGE_LENGTH - this.text().length);
   protected readonly uploading = computed(() =>
@@ -108,6 +118,7 @@ export class MessageInput {
     () =>
       !this.disabled() &&
       !this.busy() &&
+      this.recorder.state() === 'idle' &&
       !this.uploading() &&
       !this.hasErrors() &&
       (this.text().trim().length > 0 || this.readyFiles().length > 0) &&
@@ -128,15 +139,57 @@ export class MessageInput {
       queueMicrotask(() => this.autosize());
     });
 
-    // Leaving the page cancels uploads still in flight and frees thumbnails nobody else owns.
-    inject(DestroyRef).onDestroy(() =>
+    // Long recordings finish by themselves (and are transcribed like a normal stop).
+    effect(() => {
+      if (this.recorder.state() === 'recording' && this.recorder.seconds() >= MAX_RECORDING_SECONDS) {
+        untracked(() => this.finishRecording());
+      }
+    });
+
+    // Leaving the page cancels uploads and recordings still in flight and frees thumbnails nobody else owns.
+    inject(DestroyRef).onDestroy(() => {
+      if (this.recorder.state() === 'recording' || this.recorder.state() === 'starting') {
+        this.recorder.cancel();
+      }
       this.attachments().forEach((a) => {
         a.subscription?.unsubscribe();
         if (!a.uploaded || a.state !== 'ready') {
           revokeObjectUrl(a.previewUrl);
         }
-      }),
-    );
+      });
+    });
+  }
+
+  /** Mic button: start recording (asks for permission the first time). */
+  protected async startRecording(): Promise<void> {
+    try {
+      await this.recorder.start();
+    } catch (err) {
+      this.notifications.error(err instanceof VoiceInputError ? err.message : "Couldn't start the microphone.");
+    }
+  }
+
+  /** Stop button (or the time limit): transcribe and add the words to the message, ready to edit or send. */
+  protected async finishRecording(): Promise<void> {
+    try {
+      const words = (await this.recorder.stopAndTranscribe()).trim();
+      const current = this.text().trimEnd();
+      this.text.set(current ? `${current} ${words}` : words);
+      this.focus();
+    } catch (err) {
+      this.notifications.error(err instanceof VoiceInputError ? err.message : "Couldn't transcribe the recording.");
+    }
+  }
+
+  /** Esc or the discard button while recording: nothing is sent. */
+  protected cancelRecording(): void {
+    this.recorder.cancel();
+  }
+
+  protected onEscape(): void {
+    if (this.recorder.state() === 'recording') {
+      this.cancelRecording();
+    }
   }
 
   focus(): void {

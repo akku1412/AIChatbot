@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { ChatMessage } from '../../../core/models/chat.models';
+import { ReadAloudService } from '../../../core/services/read-aloud.service';
 import { SourcePreviewService } from '../../../core/services/source-preview.service';
 import { NotificationService } from '../toast/notification.service';
 import { ChatMessageView } from './chat-message';
@@ -225,6 +226,30 @@ describe('ChatMessageView', () => {
     expect(previews.source()).toEqual(source);
 
     expect((await render(reply)).querySelector('[aria-label="Sources"]')).toBeNull(); // no sources, no row
+  });
+
+  it('reads a reply aloud and stops it again', async () => {
+    const readAloud = TestBed.inject(ReadAloudService);
+    vi.spyOn(readAloud, 'supported', 'get').mockReturnValue(true);
+    const speak = vi.spyOn(readAloud, 'speak').mockImplementation((id) => readAloud.speakingId.set(id));
+    const stop = vi.spyOn(readAloud, 'stop').mockImplementation(() => readAloud.speakingId.set(null));
+    const el = await render(reply);
+
+    const button = () => el.querySelector('button[aria-label="Read aloud"], button[aria-label="Stop reading aloud"]') as HTMLButtonElement;
+    button().click();
+    fixture.detectChanges();
+    expect(speak).toHaveBeenCalledWith(42, reply.content);
+    expect(button().getAttribute('aria-label')).toBe('Stop reading aloud');
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+
+    button().click();
+    fixture.detectChanges();
+    expect(stop).toHaveBeenCalled();
+    expect(button().getAttribute('aria-label')).toBe('Read aloud');
+
+    button().click(); // reading again, then leaving the chat stops it
+    fixture.destroy();
+    expect(stop).toHaveBeenCalledTimes(2);
   });
 
   it('marks a stopped reply with "(stopped)"', async () => {

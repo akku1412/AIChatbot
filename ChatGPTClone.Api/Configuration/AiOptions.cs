@@ -61,6 +61,25 @@ public sealed class AiOptions
 
     /// <summary>Id from <see cref="Models"/> for new chats and chats whose model was removed. Empty = the first one.</summary>
     public string? DefaultModel { get; init; }
+
+    /// <summary>Speech-to-text for the microphone button (POST /api/audio/transcribe).</summary>
+    public TranscriptionOptions Transcription { get; init; } = new();
+}
+
+/// <summary>
+/// Whisper-style transcription over the OpenAI audio API (OpenAI or Groq, using that account's key and endpoint).
+/// Without a key for the chosen provider the microphone button is hidden.
+/// </summary>
+public sealed class TranscriptionOptions
+{
+    /// <summary>Uploads are cut off above this size (about 10 minutes of compressed speech).</summary>
+    public const long MaxAudioBytes = 10L * 1024 * 1024;
+
+    /// <summary>"OpenAI" or "Groq".</summary>
+    public string Provider { get; init; } = "OpenAI";
+
+    /// <summary>e.g. "whisper-1" (OpenAI) or "whisper-large-v3-turbo" (Groq).</summary>
+    public string Model { get; init; } = "whisper-1";
 }
 
 /// <summary>One entry of the model picker, e.g. "Fast" (small, cheap) or "Smart" (larger, slower).</summary>

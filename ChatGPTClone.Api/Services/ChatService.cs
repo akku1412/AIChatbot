@@ -738,7 +738,8 @@ public sealed class ChatService(
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
-    private static ApiException ToApiException(AiFailureKind kind) => kind switch
+    /// <summary>An AI provider failure as the HTTP error the client sees (also used for transcription).</summary>
+    internal static ApiException ToApiException(AiFailureKind kind) => kind switch
     {
         AiFailureKind.NotConfigured or AiFailureKind.InvalidCredentials => new ApiException(
             StatusCodes.Status503ServiceUnavailable, "AI service unavailable",

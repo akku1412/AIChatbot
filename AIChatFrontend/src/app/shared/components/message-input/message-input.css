@@ -186,3 +186,44 @@ textarea::placeholder {
   font-size: 0.8125rem;
   font-weight: 600;
 }
+
+/* Voice input: replaces the text box while recording or transcribing. */
+.recording {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 4px;
+  color: var(--text);
+  font-size: 0.9375rem;
+}
+
+.recording .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.recording .attach:first-of-type {
+  margin-left: auto;
+}
+
+.stop-recording {
+  color: var(--accent);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording .dot {
+    animation: none;
+  }
+}

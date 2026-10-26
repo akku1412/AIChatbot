@@ -10,6 +10,7 @@ using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Audio;
 using ChatGPTClone.Api.Services.Web;
 using ChatGPTClone.Api.Services.Embeddings;
 using Microsoft.AspNetCore.Hosting;
@@ -35,6 +36,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public FakeEmailSender Email { get; } = new();
     public FakeAiProvider Ai { get; } = new();
     public FakeWebSearch WebSearch { get; } = new();
+    public FakeSpeechToText Speech { get; } = new();
 
     /// <summary>Private upload folder for this test run (deleted afterwards).</summary>
     public string StoragePath { get; } = Path.Combine(Path.GetTempPath(), "chatgptclone-tests-" + Guid.NewGuid().ToString("N"));
@@ -80,6 +82,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IEmailSender>(Email);
             services.AddSingleton<IAiProviderFactory>(new FakeAiProviderFactory(Ai));
             services.AddSingleton<IWebSearchProvider>(WebSearch);
+            services.AddSingleton<ISpeechToText>(Speech);
             // The real 118 MB model is exercised by RetrievalQualityTests only; everything else uses this fake.
             services.AddSingleton<IEmbeddingProvider>(Embeddings);
         });
@@ -434,5 +437,30 @@ public sealed class FakeWebSearch : IWebSearchProvider
         Queries.Clear();
         Results = [];
         Fail = false;
+    }
+}
+
+/// <summary>Returns a fixed transcript; records what it was sent; can fail or be "not configured".</summary>
+public sealed class FakeSpeechToText : ISpeechToText
+{
+    public bool IsConfigured { get; set; } = true;
+    public string Text { get; set; } = "hello from the microphone";
+    public AiFailureKind? FailWith { get; set; }
+    public List<(string FileName, int Bytes)> Calls { get; } = [];
+
+    public async Task<string> TranscribeAsync(Stream audio, string fileName, CancellationToken cancellationToken)
+    {
+        using var copy = new MemoryStream();
+        await audio.CopyToAsync(copy, cancellationToken);
+        Calls.Add((fileName, (int)copy.Length));
+        return FailWith is { } kind ? throw new AiProviderException(kind, "simulated transcription failure") : Text;
+    }
+
+    public void Reset()
+    {
+        IsConfigured = true;
+        Text = "hello from the microphone";
+        FailWith = null;
+        Calls.Clear();
     }
 }

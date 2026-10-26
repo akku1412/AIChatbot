@@ -8,6 +8,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Repositories;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Audio;
 using ChatGPTClone.Api.Services.Embeddings;
 using ChatGPTClone.Api.Services.Export;
 using ChatGPTClone.Api.Services.Files;
@@ -127,6 +128,8 @@ builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ISharingService, SharingService>();
 // "Search the web": Tavily over HTTPS; the key stays on the server (WebSearch:ApiKey in user secrets).
 builder.Services.AddHttpClient<IWebSearchProvider, TavilyWebSearchProvider>();
+// Voice input: speech-to-text over the OpenAI audio API (OpenAI or Groq), configured under Ai:Transcription.
+builder.Services.AddSingleton<ISpeechToText, OpenAiSpeechToText>();
 
 builder.Services.AddSingleton<IGoogleTokenValidator, GoogleTokenValidator>();
 builder.Services.AddSingleton<IOtpChallengeProtector, OtpChallengeProtector>();

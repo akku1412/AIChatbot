@@ -93,6 +93,8 @@ export interface AiModels {
   defaultModelId: string;
   /** The composer can offer "Search the web". */
   webSearchAvailable?: boolean;
+  /** The composer can offer the microphone (speech-to-text). */
+  voiceInputAvailable?: boolean;
 }
 
 /** GET /api/conversations/search?q= */

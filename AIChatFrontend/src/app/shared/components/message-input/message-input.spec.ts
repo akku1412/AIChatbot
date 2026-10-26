@@ -3,6 +3,7 @@ import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@a
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { DOC_NOT_SUPPORTED_TEXT } from '../../../core/models/chat.models';
+import { VoiceInputError, VoiceRecorderService } from '../../../core/services/voice-recorder.service';
 import { NotificationService } from '../toast/notification.service';
 import { ComposerSubmit, MessageInput } from './message-input';
 
@@ -271,6 +272,77 @@ describe('MessageInput', () => {
       pick(png());
       (fixture.nativeElement.querySelector('app-attachment-chip .remove') as HTMLButtonElement).click();
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local-chart');
+    });
+  });
+
+  describe('voice input', () => {
+    const mic = () => fixture.nativeElement.querySelector('button[aria-label="Speak your message"]') as HTMLButtonElement | null;
+    let recorder: VoiceRecorderService;
+
+    function serverOffersVoice(available: boolean, browserCanRecord = true): void {
+      recorder = TestBed.inject(VoiceRecorderService);
+      vi.spyOn(recorder, 'supported', 'get').mockReturnValue(browserCanRecord);
+      models[0]!.flush({ models: [], defaultModelId: 'default', voiceInputAvailable: available });
+      fixture.detectChanges();
+    }
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('is hidden without server speech-to-text or a browser that can record', () => {
+      serverOffersVoice(false);
+      expect(mic()).toBeNull();
+    });
+
+    it('is hidden when the browser cannot record (e.g. not https)', () => {
+      serverOffersVoice(true, false);
+      expect(mic()).toBeNull();
+    });
+
+    it('records, then adds the transcript to what was already typed, ready to edit or send', async () => {
+      serverOffersVoice(true);
+      vi.spyOn(recorder, 'start').mockImplementation(async () => recorder.state.set('recording'));
+      vi.spyOn(recorder, 'stopAndTranscribe').mockImplementation(async () => {
+        recorder.state.set('idle');
+        return 'table for two at eight';
+      });
+      type('Book a');
+
+      mic()!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.recording')?.textContent).toContain('Recording 0:00');
+      expect(textarea.hidden).toBe(true);
+      press({});
+      expect(sent).toEqual([]); // nothing is sent while recording
+
+      (fixture.nativeElement.querySelector('button[aria-label="Stop and transcribe"]') as HTMLButtonElement).click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(textarea.hidden).toBe(false);
+      expect(textarea.value).toBe('Book a table for two at eight');
+      expect(sent).toEqual([]);
+    });
+
+    it('Esc discards a recording', async () => {
+      serverOffersVoice(true);
+      vi.spyOn(recorder, 'start').mockImplementation(async () => recorder.state.set('recording'));
+      const cancel = vi.spyOn(recorder, 'cancel').mockImplementation(() => recorder.state.set('idle'));
+      mic()!.click();
+      await fixture.whenStable();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      expect(cancel).toHaveBeenCalled();
+    });
+
+    it('shows why the microphone could not start', async () => {
+      serverOffersVoice(true);
+      const errors: string[] = [];
+      vi.spyOn(TestBed.inject(NotificationService), 'error').mockImplementation((m: string) => void errors.push(m));
+      vi.spyOn(recorder, 'start').mockRejectedValue(new VoiceInputError('Microphone access is blocked.'));
+
+      mic()!.click();
+      await fixture.whenStable();
+      expect(errors).toEqual(['Microphone access is blocked.']);
     });
   });
 

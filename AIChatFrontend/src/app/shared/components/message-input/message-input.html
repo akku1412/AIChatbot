@@ -53,8 +53,42 @@
       </button>
     }
 
+    @if (voiceAvailable() && recorder.state() === 'idle') {
+      <button type="button" class="attach mic" [disabled]="disabled()" aria-label="Speak your message"
+              title="Speak your message" (click)="startRecording()">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+      </button>
+    }
+    @if (recorder.state() !== 'idle') {
+      <div class="recording" role="status">
+        @switch (recorder.state()) {
+          @case ('starting') {
+            <span>Waiting for the microphone…</span>
+          }
+          @case ('recording') {
+            <span class="dot" aria-hidden="true"></span>
+            <span>Recording {{ recordingTime() }}</span>
+            <button type="button" class="attach" aria-label="Discard recording" title="Discard (Esc)" (click)="cancelRecording()">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+            </button>
+            <button type="button" class="attach stop-recording" aria-label="Stop and transcribe" title="Stop and transcribe"
+                    (click)="finishRecording()">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12l5 5L20 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </button>
+          }
+          @case ('transcribing') {
+            <span>Transcribing…</span>
+          }
+        }
+      </div>
+    }
+
     <textarea
       #box
+      [hidden]="recorder.state() !== 'idle'"
       rows="1"
       [value]="text()"
       [attr.maxlength]="maxLength"

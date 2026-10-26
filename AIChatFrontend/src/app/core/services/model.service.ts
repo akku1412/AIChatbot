@@ -15,6 +15,8 @@ export class ModelService {
   readonly defaultModelId = signal<string | null>(null);
   /** The server has a search API key: the composer offers "Search the web". */
   readonly webSearchAvailable = signal(false);
+  /** The server has speech-to-text: the composer offers the microphone. */
+  readonly voiceInputAvailable = signal(false);
 
   load(): void {
     if (this.loaded) {
@@ -22,10 +24,11 @@ export class ModelService {
     }
     this.loaded = true;
     this.http.get<AiModels>(`${environment.apiBaseUrl}/models`).subscribe({
-      next: ({ models, defaultModelId, webSearchAvailable }) => {
+      next: ({ models, defaultModelId, webSearchAvailable, voiceInputAvailable }) => {
         this.models.set(models);
         this.defaultModelId.set(defaultModelId);
         this.webSearchAvailable.set(webSearchAvailable ?? false);
+        this.voiceInputAvailable.set(voiceInputAvailable ?? false);
       },
       error: () => (this.loaded = false), // retry next time; chats still work with the default model
     });

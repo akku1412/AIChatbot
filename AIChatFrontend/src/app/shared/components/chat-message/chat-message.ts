@@ -1,4 +1,4 @@
-import { Component, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { finalize } from 'rxjs';
 
 import { errorMessage } from '../../../core/http/api-error';
@@ -7,6 +7,7 @@ import { ChatApiService } from '../../../core/services/chat-api.service';
 import { safeFileName, saveResponse } from '../../../core/services/download';
 import { FileApiService } from '../../../core/services/file-api.service';
 import { ImagePreviewService } from '../../../core/services/image-preview.service';
+import { ReadAloudService } from '../../../core/services/read-aloud.service';
 import { SourcePreviewService } from '../../../core/services/source-preview.service';
 import { AppLogo } from '../app-logo/app-logo';
 import { AttachmentChip } from '../attachment-chip/attachment-chip';
@@ -156,6 +157,19 @@ interface ExportOption {
                 <span>Copy</span>
               }
             </button>
+
+            @if (canReadAloud) {
+              <button type="button" class="action" [attr.aria-pressed]="speaking()" (click)="toggleReadAloud()"
+                      [attr.aria-label]="speaking() ? 'Stop reading aloud' : 'Read aloud'">
+                @if (speaking()) {
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+                  <span>Stop</span>
+                } @else {
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span>Read aloud</span>
+                }
+              </button>
+            }
 
             @if (canRegenerate()) {
               <button type="button" class="action" (click)="regenerate.emit()" aria-label="Regenerate response" title="Regenerate response">
@@ -308,6 +322,20 @@ export class ChatMessageView {
   private readonly fileApi = inject(FileApiService);
   private readonly previews = inject(ImagePreviewService);
   private readonly sourcePreview = inject(SourcePreviewService);
+  private readonly readAloud = inject(ReadAloudService);
+  /** The browser can speak (speechSynthesis). */
+  protected readonly canReadAloud = this.readAloud.supported;
+  protected readonly speaking = computed(() => this.readAloud.speakingId() === this.message().messageId);
+  /** Switching chats (or deleting this reply) stops reading it. */
+  private readonly stopReadingOnLeave = inject(DestroyRef).onDestroy(() => this.speaking() && this.readAloud.stop());
+
+  protected toggleReadAloud(): void {
+    if (this.speaking()) {
+      this.readAloud.stop();
+    } else {
+      this.readAloud.speak(this.message().messageId, this.message().content);
+    }
+  }
 
   /** Passages this reply cited (the server keeps only real, owned ones). */
   protected readonly sources = computed(() => this.message().sources ?? []);

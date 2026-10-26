@@ -11,9 +11,10 @@ public sealed record AiModelDto(string Id, string Label, string? Description, bo
 
 /// <summary>
 /// GET /api/models: what the picker offers, which one new chats use, and whether the composer can offer
-/// "Search the web" (a search API key is configured).
+/// "Search the web" (a search API key is configured) and the microphone (speech-to-text is configured).
 /// </summary>
-public sealed record AiModelsDto(IReadOnlyList<AiModelDto> Models, string DefaultModelId, bool WebSearchAvailable = false);
+public sealed record AiModelsDto(IReadOnlyList<AiModelDto> Models, string DefaultModelId, bool WebSearchAvailable = false,
+    bool VoiceInputAvailable = false);
 
 /// <summary>Creates the provider that talks to one configured model (tests replace this with a fake).</summary>
 public interface IAiProviderFactory
