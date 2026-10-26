@@ -1,4 +1,5 @@
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Web;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,9 +10,9 @@ namespace ChatGPTClone.Api.Controllers;
 [Route("api/models")]
 [Authorize]
 [Produces("application/json")]
-public sealed class ModelsController(IAiModelCatalog models) : ControllerBase
+public sealed class ModelsController(IAiModelCatalog models, IWebSearchProvider webSearch) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(AiModelsDto), StatusCodes.Status200OK)]
-    public ActionResult<AiModelsDto> List() => Ok(models.Describe());
+    public ActionResult<AiModelsDto> List() => Ok(models.Describe() with { WebSearchAvailable = webSearch.IsConfigured });
 }

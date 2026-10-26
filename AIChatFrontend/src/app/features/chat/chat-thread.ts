@@ -136,9 +136,9 @@ export class ChatThread {
     this.composer()?.focus();
   }
 
-  protected send({ text, attachments }: ComposerSubmit): void {
+  protected send({ text, attachments, webSearch }: ComposerSubmit): void {
     this.draft.set('');
-    this.store.send(text, attachments).subscribe({
+    this.store.send(text, attachments, webSearch).subscribe({
       next: (conversationId) => {
         // The files now belong to the sent message. On failure they stay in the composer to retry.
         this.composer()?.clearAttachments();

@@ -11,6 +11,7 @@ using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Services.Embeddings;
 using ChatGPTClone.Api.Services.Export;
 using ChatGPTClone.Api.Services.Files;
+using ChatGPTClone.Api.Services.Web;
 using ChatGPTClone.Api.Validators;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -66,6 +67,11 @@ builder.Services.AddOptions<EmbeddingOptions>()
     .ValidateDataAnnotations()
     .Validate(o => o.Provider is "Local" or "OpenAI" or "None", "Embeddings:Provider must be Local, OpenAI or None.")
     .ValidateOnStart();
+builder.Services.AddOptions<WebSearchOptions>()
+    .Bind(builder.Configuration.GetSection(WebSearchOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(o => o.Provider == "Tavily", "WebSearch:Provider must be Tavily.")
+    .ValidateOnStart();
 builder.Services.AddOptions<AiOptions>()
     .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
     .ValidateDataAnnotations()
@@ -119,6 +125,8 @@ builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ISharingService, SharingService>();
+// "Search the web": Tavily over HTTPS; the key stays on the server (WebSearch:ApiKey in user secrets).
+builder.Services.AddHttpClient<IWebSearchProvider, TavilyWebSearchProvider>();
 
 builder.Services.AddSingleton<IGoogleTokenValidator, GoogleTokenValidator>();
 builder.Services.AddSingleton<IOtpChallengeProtector, OtpChallengeProtector>();

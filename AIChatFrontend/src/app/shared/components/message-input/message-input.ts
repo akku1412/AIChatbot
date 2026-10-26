@@ -24,6 +24,7 @@ import {
 } from '../../../core/models/chat.models';
 import { FileApiService, isProcessing, processingLabel } from '../../../core/services/file-api.service';
 import { ImagePreviewService, createObjectUrl, revokeObjectUrl } from '../../../core/services/image-preview.service';
+import { ModelService } from '../../../core/services/model.service';
 import { AttachmentChip, ChipState, formatFileSize } from '../attachment-chip/attachment-chip';
 import { NotificationService } from '../toast/notification.service';
 
@@ -31,6 +32,8 @@ import { NotificationService } from '../toast/notification.service';
 export interface ComposerSubmit {
   text: string;
   attachments: AttachmentInfo[];
+  /** "Search the web" was on for this message. */
+  webSearch: boolean;
 }
 
 interface PendingAttachment {
@@ -69,6 +72,7 @@ interface PendingAttachment {
 export class MessageInput {
   private readonly fileApi = inject(FileApiService);
   private readonly previews = inject(ImagePreviewService);
+  private readonly models = inject(ModelService);
   private readonly notifications = inject(NotificationService);
 
   /** Two-way bound draft text, so the parent can restore it after a failed send. */
@@ -87,6 +91,10 @@ export class MessageInput {
   protected readonly dragging = signal(false);
   protected readonly limits = this.fileApi.limits;
   protected readonly accept = computed(() => this.limits().allowedExtensions.join(','));
+  /** Shown only when the server has a search API key. */
+  protected readonly webSearchAvailable = this.models.webSearchAvailable;
+  /** "Search the web" for the next message (off again after it is sent). */
+  protected readonly webSearch = signal(false);
 
   protected readonly remaining = computed(() => MAX_MESSAGE_LENGTH - this.text().length);
   protected readonly uploading = computed(() =>
@@ -112,6 +120,7 @@ export class MessageInput {
 
   constructor() {
     this.fileApi.loadLimits();
+    this.models.load();
 
     // Keep the height in sync when the text changes from outside (cleared or restored).
     effect(() => {
@@ -134,9 +143,13 @@ export class MessageInput {
     this.box().nativeElement.focus();
   }
 
-  /** Called by the chat after a successful send: the files now belong to the message, so keep them on the server. */
+  /**
+   * Called by the chat after a successful send: the files now belong to the message, so keep them on the server.
+   * Web search is per message, so it switches off again too.
+   */
   clearAttachments(): void {
     this.attachments.set([]);
+    this.webSearch.set(false);
   }
 
   protected openPicker(): void {
@@ -217,6 +230,7 @@ export class MessageInput {
         fileSize: f.fileSize,
         isImage: f.isImage ?? false,
       })),
+      webSearch: this.webSearch() && this.webSearchAvailable(),
     });
   }
 

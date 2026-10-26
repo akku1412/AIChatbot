@@ -69,6 +69,8 @@ export class ChatStore {
   readonly sending = signal(false);
   /** True while the message being sent carries files (the reply takes longer: documents are read first). */
   readonly sendingWithFiles = signal(false);
+  /** True while the message being sent searches the web first. */
+  readonly sendingWithWebSearch = signal(false);
   /** The temporary id of the reply that is streaming in right now. */
   readonly streamingMessageId = signal<number | null>(null);
   /** Stop was pressed; waiting for the server to finish saving the partial reply. */
@@ -375,7 +377,7 @@ export class ChatStore {
    * thread. Emits the conversation id once the reply is saved (also when stopped). The user's message shows
    * immediately; on failure it is removed again and the error propagates to the caller.
    */
-  send(content: string, attachments: AttachmentInfo[] = []): Observable<number> {
+  send(content: string, attachments: AttachmentInfo[] = [], webSearch = false): Observable<number> {
     const snapshot = this.messages();
     const view: TurnView = {
       before: snapshot,
@@ -403,7 +405,8 @@ export class ChatStore {
     return this.runTurn(
       view,
       attachments.length > 0,
-      conversationId$.pipe(map((id) => ({ id, events: this.api.streamMessage(id, content, attachments.map((a) => a.fileId)) }))),
+      conversationId$.pipe(map((id) => ({ id, events: this.api.streamMessage(id, content, attachments.map((a) => a.fileId), webSearch) }))),
+      webSearch,
     ).pipe(
       tap({
         error: () => {
@@ -498,6 +501,7 @@ export class ChatStore {
     view: TurnView,
     withFiles: boolean,
     start$: Observable<{ id: number; events: Observable<ChatStreamEvent> }>,
+    withWebSearch = false,
   ): Observable<number> {
     const reply = this.tempMessage('assistant', '');
     this.messages.set([...view.before, view.question, reply]);
@@ -505,6 +509,7 @@ export class ChatStore {
     this.sending.set(true);
     this.stopping.set(false);
     this.sendingWithFiles.set(withFiles);
+    this.sendingWithWebSearch.set(withWebSearch);
     this.streamingMessageId.set(reply.messageId);
 
     return start$.pipe(

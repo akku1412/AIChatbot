@@ -39,6 +39,17 @@ describe('MarkdownView', () => {
     expect((await render('Hello', false)).classList.contains('streaming')).toBe(false);
   });
 
+  it('hides [web:N] markers of a streaming web-search reply, and renders the saved links', async () => {
+    const streaming = await render('Hall B [web:2]. More [web:1, web:3]', true);
+    expect(streaming.textContent?.trim()).toBe('Hall B . More');
+
+    const saved = await render('Hall B ([venue.example.org](<https://venue.example.org/>)).');
+    const link = saved.querySelector('a') as HTMLAnchorElement;
+    expect(link.textContent).toBe('venue.example.org');
+    expect(link.getAttribute('href')).toBe('https://venue.example.org/');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+  });
+
   describe('citations', () => {
     const page3: MessageSource = { chunkId: 12, fileId: 'f-1', fileName: 'memo.pdf', location: 'Page 3', isOcr: false };
     const slide4: MessageSource = { chunkId: 13, fileId: 'f-2', fileName: 'deck.pptx', location: 'Slide 4', isOcr: false };

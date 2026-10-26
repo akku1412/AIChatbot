@@ -10,6 +10,7 @@ using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Web;
 using ChatGPTClone.Api.Services.Embeddings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -33,6 +34,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public FakeEmailSender Email { get; } = new();
     public FakeAiProvider Ai { get; } = new();
+    public FakeWebSearch WebSearch { get; } = new();
 
     /// <summary>Private upload folder for this test run (deleted afterwards).</summary>
     public string StoragePath { get; } = Path.Combine(Path.GetTempPath(), "chatgptclone-tests-" + Guid.NewGuid().ToString("N"));
@@ -77,6 +79,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IGoogleTokenValidator, FakeGoogleTokenValidator>();
             services.AddSingleton<IEmailSender>(Email);
             services.AddSingleton<IAiProviderFactory>(new FakeAiProviderFactory(Ai));
+            services.AddSingleton<IWebSearchProvider>(WebSearch);
             // The real 118 MB model is exercised by RetrievalQualityTests only; everything else uses this fake.
             services.AddSingleton<IEmbeddingProvider>(Embeddings);
         });
@@ -185,6 +188,9 @@ public sealed class FakeAiProvider : IAiChatProvider
     public AiFailureKind? FailWith { get; set; }
     public ConcurrentBag<IReadOnlyList<AiChatMessage>> Prompts { get; } = [];
 
+    /// <summary>Prompts that asked for a standalone web search query.</summary>
+    public ConcurrentBag<IReadOnlyList<AiChatMessage>> SearchQueryPrompts { get; } = [];
+
     /// <summary>The most recent prompt (tests in a collection run one at a time).</summary>
     public IReadOnlyList<AiChatMessage>? LastPrompt { get; private set; }
 
@@ -199,6 +205,11 @@ public sealed class FakeAiProvider : IAiChatProvider
         if (messages[0].Content.StartsWith("Write a short title", StringComparison.Ordinal))
         {
             return Task.FromResult(new AiCompletion("\"Fake Generated Title\"", 5, false));
+        }
+        if (messages[0].Content == ChatService.SearchQueryInstructions)
+        {
+            SearchQueryPrompts.Add(messages);
+            return Task.FromResult(new AiCompletion("\"fake standalone query\"", 5, false));
         }
 
         Prompts.Add(messages);
@@ -401,4 +412,27 @@ public static class TestAuth
 public sealed class ApiCollection : ICollectionFixture<ApiFactory>
 {
     public const string Name = "api";
+}
+
+/// <summary>Search results on demand; records queries; can be switched to fail or to "not configured".</summary>
+public sealed class FakeWebSearch : IWebSearchProvider
+{
+    public bool IsConfigured { get; set; } = true;
+    public List<string> Queries { get; } = [];
+    public IReadOnlyList<WebResult> Results { get; set; } = [];
+    public bool Fail { get; set; }
+
+    public Task<IReadOnlyList<WebResult>> SearchAsync(string query, CancellationToken cancellationToken)
+    {
+        Queries.Add(query);
+        return Fail ? throw new WebSearchException("simulated search outage") : Task.FromResult(Results);
+    }
+
+    public void Reset()
+    {
+        IsConfigured = true;
+        Queries.Clear();
+        Results = [];
+        Fail = false;
+    }
 }

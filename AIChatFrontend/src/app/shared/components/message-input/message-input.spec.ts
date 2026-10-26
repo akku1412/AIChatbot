@@ -1,5 +1,5 @@
 import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { DOC_NOT_SUPPORTED_TEXT } from '../../../core/models/chat.models';
@@ -11,6 +11,7 @@ describe('MessageInput', () => {
   let http: HttpTestingController;
   let textarea: HTMLTextAreaElement;
   let sent: ComposerSubmit[];
+  let models: TestRequest[];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -23,6 +24,7 @@ describe('MessageInput', () => {
     fixture.componentInstance.send.subscribe((payload) => sent.push(payload));
     await fixture.whenStable();
     http.match((req) => req.url.endsWith('/files/limits')); // keep the defaults
+    models = http.match((req) => req.url.endsWith('/models'));
     textarea = fixture.nativeElement.querySelector('textarea');
   });
 
@@ -52,7 +54,7 @@ describe('MessageInput', () => {
     type('  hello  ');
     const event = press({});
     expect(event.defaultPrevented).toBe(true);
-    expect(sent).toEqual([{ text: 'hello', attachments: [] }]);
+    expect(sent).toEqual([{ text: 'hello', attachments: [], webSearch: false }]);
   });
 
   it('does not send on Shift+Enter (new line instead)', () => {
@@ -144,7 +146,7 @@ describe('MessageInput', () => {
     fixture.detectChanges();
     press({});
     expect(sent).toEqual([
-      { text: 'summarize', attachments: [{ fileId: 'f1', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13, isImage: false }] },
+      { text: 'summarize', attachments: [{ fileId: 'f1', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13, isImage: false }], webSearch: false },
     ]);
   });
 
@@ -255,7 +257,7 @@ describe('MessageInput', () => {
       fixture.detectChanges();
       press({});
       expect(sent).toEqual([
-        { text: '', attachments: [{ fileId: 'img1', fileName: 'chart.png', fileExtension: '.png', fileSize: 8, isImage: true }] },
+        { text: '', attachments: [{ fileId: 'img1', fileName: 'chart.png', fileExtension: '.png', fileSize: 8, isImage: true }], webSearch: false },
       ]);
     });
 
@@ -269,6 +271,38 @@ describe('MessageInput', () => {
       pick(png());
       (fixture.nativeElement.querySelector('app-attachment-chip .remove') as HTMLButtonElement).click();
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local-chart');
+    });
+  });
+
+  describe('Search the web', () => {
+    const toggle = () => fixture.nativeElement.querySelector('button[aria-label="Search the web"]') as HTMLButtonElement | null;
+
+    function serverOffersSearch(available: boolean): void {
+      models[0]!.flush({ models: [], defaultModelId: 'default', webSearchAvailable: available });
+      fixture.detectChanges();
+    }
+
+    it('is hidden when the server has no search API configured', () => {
+      serverOffersSearch(false);
+      expect(toggle()).toBeNull();
+    });
+
+    it('applies to one message: on for the next send, then off again', () => {
+      serverOffersSearch(true);
+      expect(toggle()!.getAttribute('aria-pressed')).toBe('false');
+
+      toggle()!.click();
+      fixture.detectChanges();
+      expect(toggle()!.getAttribute('aria-pressed')).toBe('true');
+      expect(toggle()!.textContent).toContain('Search');
+
+      type('latest Angular release?');
+      press({});
+      expect(sent).toEqual([{ text: 'latest Angular release?', attachments: [], webSearch: true }]);
+
+      fixture.componentInstance.clearAttachments(); // what the chat calls after a successful send
+      fixture.detectChanges();
+      expect(toggle()!.getAttribute('aria-pressed')).toBe('false');
     });
   });
 

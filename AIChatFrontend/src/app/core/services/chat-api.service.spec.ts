@@ -87,7 +87,7 @@ describe('ChatApiService', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/chat/7/messages/stream');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ content: 'hi', attachmentIds: [] });
+    expect(JSON.parse(init.body as string)).toEqual({ content: 'hi', attachmentIds: [], webSearch: false });
     expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer access-token');
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(events).toEqual([

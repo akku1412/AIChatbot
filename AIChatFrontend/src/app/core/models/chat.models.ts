@@ -91,6 +91,8 @@ export interface AiModel {
 export interface AiModels {
   models: AiModel[];
   defaultModelId: string;
+  /** The composer can offer "Search the web". */
+  webSearchAvailable?: boolean;
 }
 
 /** GET /api/conversations/search?q= */

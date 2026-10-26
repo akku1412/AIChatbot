@@ -107,10 +107,28 @@ const citation: TokenizerAndRendererExtension = {
   },
 };
 
+/**
+ * "[web:2]" markers only appear while a web-search reply streams: the saved reply has real links instead
+ * (the server turns each marker into a link to that search result). Until then they render as nothing.
+ */
+const webCitation: TokenizerAndRendererExtension = {
+  name: 'webCitation',
+  level: 'inline',
+  start(src: string): number | undefined {
+    const index = src.search(/\[\s*web:/i);
+    return index >= 0 ? index : undefined;
+  },
+  tokenizer(src: string): Tokens.Generic | undefined {
+    const match = /^\[\s*web:\d+(?:\s*[,;]\s*(?:web:)?\d+)*\s*\]/i.exec(src);
+    return match ? { type: 'webCitation', raw: match[0] } : undefined;
+  },
+  renderer: () => '',
+};
+
 const markdown = new Marked({
   gfm: true,
   breaks: false,
-  extensions: [citation],
+  extensions: [citation, webCitation],
   renderer: {
     // Raw HTML written by the model is shown as text, never interpreted.
     html(token: Tokens.HTML | Tokens.Tag): string {

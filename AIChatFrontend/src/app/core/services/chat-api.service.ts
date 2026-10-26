@@ -124,8 +124,9 @@ export class ChatApiService {
   }
 
   /** Sends a message and streams the reply: "delta" pieces, then "done" with the saved messages. */
-  streamMessage(conversationId: number, content: string, attachmentIds: string[] = []): Observable<ChatStreamEvent> {
-    return this.streams.stream(`${this.chatUrl}/${conversationId}/messages/stream`, 'POST', { content, attachmentIds });
+  /** webSearch: the "Search the web" toggle (ignored by the server when no search API is configured). */
+  streamMessage(conversationId: number, content: string, attachmentIds: string[] = [], webSearch = false): Observable<ChatStreamEvent> {
+    return this.streams.stream(`${this.chatUrl}/${conversationId}/messages/stream`, 'POST', { content, attachmentIds, webSearch });
   }
 
   /** Streams a new version of this AI reply (or a first reply, for a question without one). */

@@ -7,6 +7,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Services.Files;
+using ChatGPTClone.Api.Services.Web;
 using Microsoft.Extensions.Options;
 
 namespace ChatGPTClone.Api.Services;
@@ -17,14 +18,14 @@ public interface IChatService
         CancellationToken cancellationToken);
 
     Task<SendMessageResponse> SendAsync(int userId, int conversationId, string? content, IReadOnlyList<Guid>? attachmentIds,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken, bool webSearch = false);
 
     /// <summary>The conversation a message belongs to; 404 unless it is the user's.</summary>
     Task<int> GetConversationIdAsync(int userId, long messageId, CancellationToken cancellationToken);
 
     /// <summary>Checks ownership and files, then builds the prompt for a new user message. Nothing is saved yet.</summary>
     Task<ChatTurn> PrepareTurnAsync(int userId, int conversationId, string? content, IReadOnlyList<Guid>? attachmentIds,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken, bool webSearch = false);
 
     /// <summary>
     /// A new version of an AI reply (<paramref name="messageId"/> = that reply), or a first reply to a question that
@@ -88,6 +89,9 @@ public sealed record ChatTurn
 
     /// <summary>Document passages given to the AI (ChunkId → score); the ones the reply cites are saved as its sources.</summary>
     public IReadOnlyDictionary<long, double> Passages { get; init; } = new Dictionary<long, double>();
+
+    /// <summary>Web results given to the AI (the "Search the web" toggle); the reply's [web:N] markers become links to them.</summary>
+    public IReadOnlyList<WebResult> WebResults { get; init; } = [];
 }
 
 public sealed class ChatService(
@@ -97,6 +101,7 @@ public sealed class ChatService(
     IAiModelCatalog models,
     IUserService users,
     IProjectService projects,
+    IWebSearchProvider webSearchProvider,
     IFileService fileService,
     IDocumentContextBuilder documentContext,
     IFileStorage fileStorage,
@@ -185,9 +190,9 @@ public sealed class ChatService(
     }
 
     public async Task<SendMessageResponse> SendAsync(int userId, int conversationId, string? content,
-        IReadOnlyList<Guid>? attachmentIds, CancellationToken cancellationToken)
+        IReadOnlyList<Guid>? attachmentIds, CancellationToken cancellationToken, bool webSearch = false)
     {
-        var turn = await PrepareTurnAsync(userId, conversationId, content, attachmentIds, cancellationToken);
+        var turn = await PrepareTurnAsync(userId, conversationId, content, attachmentIds, cancellationToken, webSearch);
 
         // Ask the AI first: if it fails, nothing is saved, so the user can simply resend.
         var completion = await CompleteAsync(turn.Model, turn.Prompt, _options.MaxOutputTokens, cancellationToken);
@@ -199,7 +204,7 @@ public sealed class ChatService(
     }
 
     public async Task<ChatTurn> PrepareTurnAsync(int userId, int conversationId, string? content,
-        IReadOnlyList<Guid>? attachmentIds, CancellationToken cancellationToken)
+        IReadOnlyList<Guid>? attachmentIds, CancellationToken cancellationToken, bool webSearch = false)
     {
         var conversation = await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
 
@@ -212,7 +217,7 @@ public sealed class ChatService(
         var thread = ConversationTree.ActiveThread(nodes).Select(t => t.Node).ToList();
         var parentId = thread.LastOrDefault()?.MessageId;
 
-        return await BuildTurnAsync(userId, conversation, text, newFiles, thread, cancellationToken) with
+        return await BuildTurnAsync(userId, conversation, text, newFiles, thread, cancellationToken, webSearch) with
         {
             ParentMessageId = parentId,
             UserVersionIndex = ConversationTree.NextVersionIndex(nodes, parentId),
@@ -287,7 +292,7 @@ public sealed class ChatService(
 
     /// <summary>Builds the prompt from the thread before the question (<paramref name="historyPath"/>, root first).</summary>
     private async Task<ChatTurn> BuildTurnAsync(int userId, Conversation conversation, string text, List<UploadedFile> newFiles,
-        List<MessageNode> historyPath, CancellationToken cancellationToken)
+        List<MessageNode> historyPath, CancellationToken cancellationToken, bool searchWeb = false)
     {
         var recentIds = historyPath.TakeLast(_options.MaxHistoryMessages).Select(n => n.MessageId).ToList();
         var history = await messageRepository.GetByIdsAsync(recentIds, cancellationToken);
@@ -317,18 +322,73 @@ public sealed class ChatService(
             CustomInstructions(await users.GetSettingsAsync(userId, cancellationToken)),
             ProjectInstructionsBlock(projectInstructions));
 
+        // "Search the web": results go in as untrusted data after the documents; a failed search is said, not hidden.
+        IReadOnlyList<WebResult> webResults = [];
+        string? web = null;
+        if (searchWeb && webSearchProvider.IsConfigured)
+        {
+            try
+            {
+                var query = await SearchQueryAsync(history, text, cancellationToken);
+                webResults = await webSearchProvider.SearchAsync(query, cancellationToken);
+                web = WebResults.Block(webResults, DateTime.UtcNow);
+                logger.LogInformation("Web search for conversation {ConversationId}: {Count} results", conversation.ConversationId, webResults.Count);
+            }
+            catch (WebSearchException ex)
+            {
+                logger.LogWarning("Web search failed for conversation {ConversationId}: {Reason}", conversation.ConversationId, ex.Message);
+                web = WebResults.FailedNote;
+            }
+        }
+
         return new ChatTurn
         {
             Conversation = conversation,
             Model = models.Resolve(conversation.ModelId),
             Text = text,
             NewFiles = newFiles,
-            Prompt = BuildPrompt(history, WithAttachmentNote(text, newFiles.Select(f => f.OriginalFileName)), documents?.Text, images, preferences),
+            Prompt = BuildPrompt(history, WithAttachmentNote(text, newFiles.Select(f => f.OriginalFileName)), documents?.Text, images,
+                preferences, web),
             IsFirstExchange = historyPath.Count == 0,
             ContextFileCount = contextFiles.Count,
             AncestorPath = historyPath,
             Passages = documents?.Passages ?? new Dictionary<long, double>(),
+            WebResults = webResults,
         };
+    }
+
+    internal const string SearchQueryInstructions =
+        "Rewrite the user's last message as a standalone web search query, using the conversation for context " +
+        "(names, places, dates it refers to). Reply with the query only: at most 12 words, no quotes.";
+
+    /// <summary>
+    /// The search query: the question itself, or for a follow-up ("and in Europe?") a standalone query written by the
+    /// default model from the recent conversation. Falls back to the question if that fails.
+    /// </summary>
+    private async Task<string> SearchQueryAsync(List<Message> history, string text, CancellationToken cancellationToken)
+    {
+        var question = Truncate(text, 400);
+        if (history.Count == 0)
+        {
+            return question;
+        }
+        try
+        {
+            List<AiChatMessage> prompt =
+            [
+                new(MessageRole.System, SearchQueryInstructions),
+                .. history.TakeLast(4).Select(m => new AiChatMessage(m.Role, Truncate(m.Content, 600))),
+                new(MessageRole.User, question),
+            ];
+            var result = await models.Provider(null).CompleteAsync(prompt, 40, cancellationToken);
+            var query = result.Content.Trim().Trim('"', '\'').Trim();
+            return query.Length is > 0 and <= 400 ? query : question;
+        }
+        catch (AiProviderException ex)
+        {
+            logger.LogInformation("Search query rewrite failed ({Kind}); searching for the question as asked", ex.Kind);
+            return question;
+        }
     }
 
     /// <summary>
@@ -454,7 +514,8 @@ public sealed class ChatService(
             {
                 ConversationId = conversationId,
                 Role = MessageRole.Assistant,
-                Content = reply.Trim(),
+                // "[web:2]" markers become links to the results the AI was actually given.
+                Content = WebResults.LinkCitations(reply.Trim(), turn.WebResults),
                 TokenUsage = totalTokens,
                 ParentMessageId = userMessage.MessageId,
                 VersionIndex = turn.ReplyVersionIndex,
@@ -498,14 +559,15 @@ public sealed class ChatService(
     }
 
     /// <summary>
-    /// System prompt (+ the user's custom instructions + document rules and content) + as much recent history as fits
-    /// the character budget + the new message. Document text is bounded by FileUploads:MaxDocumentContextCharacters.
+    /// System prompt (+ the user's custom instructions + document rules and content + web results) + as much recent
+    /// history as fits the character budget + the new message. Document text is bounded by
+    /// FileUploads:MaxDocumentContextCharacters; web results by WebSearch:MaxResults × MaxCharactersPerResult.
     /// </summary>
     private List<AiChatMessage> BuildPrompt(List<Message> history, string newMessage, string? documents,
-        List<AiImage>? images = null, string? preferences = null)
+        List<AiImage>? images = null, string? preferences = null, string? web = null)
     {
         // Order matters: the app's own rules first, then the user's preferences (which defer to those rules),
-        // then the document rules and the documents themselves.
+        // then the document rules and the documents themselves, then web results (also untrusted data).
         var system = _options.SystemPrompt;
         if (preferences is not null)
         {
@@ -514,6 +576,10 @@ public sealed class ChatService(
         if (documents is not null)
         {
             system += $"\n\n{DocumentInstructions}\n\n{documents}";
+        }
+        if (web is not null)
+        {
+            system += "\n\n" + web;
         }
         if (images is { Count: > 0 })
         {

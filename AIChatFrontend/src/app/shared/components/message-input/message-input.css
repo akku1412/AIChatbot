@@ -164,3 +164,25 @@ textarea::placeholder {
   color: var(--text-muted);
   cursor: progress;
 }
+
+/* "Search the web": a pill with a label while it is on. */
+.web-toggle.on {
+  width: auto;
+  gap: 4px;
+  padding: 0 10px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.web-toggle.on:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.web-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}

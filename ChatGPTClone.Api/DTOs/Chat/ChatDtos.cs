@@ -104,8 +104,11 @@ public sealed record RenameConversationRequest(string Title);
 /// <summary>Partial update: only the fields that are present change. ModelId must be an id from GET /api/models.</summary>
 public sealed record PatchConversationRequest(string? Title, bool? IsPinned, bool? Archived, string? ModelId = null);
 
-/// <summary>Content may be empty when files are attached (the AI is then asked to summarize them).</summary>
-public sealed record SendMessageRequest(string? Content, IReadOnlyList<Guid>? AttachmentIds);
+/// <summary>
+/// Content may be empty when files are attached (the AI is then asked to summarize them). WebSearch: search the web
+/// for this message ("Search the web" toggle; ignored when web search isn't configured on the server).
+/// </summary>
+public sealed record SendMessageRequest(string? Content, IReadOnlyList<Guid>? AttachmentIds, bool WebSearch = false);
 
 /// <summary>Edit and resend: the new text of a user message.</summary>
 public sealed record EditMessageRequest(string Content);

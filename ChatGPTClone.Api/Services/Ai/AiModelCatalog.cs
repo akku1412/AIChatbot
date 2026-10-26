@@ -9,8 +9,11 @@ namespace ChatGPTClone.Api.Services.Ai;
 /// <summary>A model as clients see it: an id and a label, never the provider's model name or keys.</summary>
 public sealed record AiModelDto(string Id, string Label, string? Description, bool SupportsVision);
 
-/// <summary>GET /api/models: what the picker offers, and which one new chats use.</summary>
-public sealed record AiModelsDto(IReadOnlyList<AiModelDto> Models, string DefaultModelId);
+/// <summary>
+/// GET /api/models: what the picker offers, which one new chats use, and whether the composer can offer
+/// "Search the web" (a search API key is configured).
+/// </summary>
+public sealed record AiModelsDto(IReadOnlyList<AiModelDto> Models, string DefaultModelId, bool WebSearchAvailable = false);
 
 /// <summary>Creates the provider that talks to one configured model (tests replace this with a fake).</summary>
 public interface IAiProviderFactory

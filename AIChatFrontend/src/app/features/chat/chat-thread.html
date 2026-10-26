@@ -68,7 +68,7 @@
           }
         }
         @if (store.waitingForFirstToken()) {
-          <app-typing-indicator [label]="store.sendingWithFiles() ? 'Reading your documents…' : ''" />
+          <app-typing-indicator [label]="store.sendingWithWebSearch() ? 'Searching the web…' : store.sendingWithFiles() ? 'Reading your documents…' : ''" />
         }
         @if (unansweredQuestion(); as question) {
           <div class="unanswered">

@@ -13,6 +13,8 @@ export class ModelService {
   /** Empty until loaded (the picker stays hidden; chats use the server's default). */
   readonly models = signal<AiModel[]>([]);
   readonly defaultModelId = signal<string | null>(null);
+  /** The server has a search API key: the composer offers "Search the web". */
+  readonly webSearchAvailable = signal(false);
 
   load(): void {
     if (this.loaded) {
@@ -20,9 +22,10 @@ export class ModelService {
     }
     this.loaded = true;
     this.http.get<AiModels>(`${environment.apiBaseUrl}/models`).subscribe({
-      next: ({ models, defaultModelId }) => {
+      next: ({ models, defaultModelId, webSearchAvailable }) => {
         this.models.set(models);
         this.defaultModelId.set(defaultModelId);
+        this.webSearchAvailable.set(webSearchAvailable ?? false);
       },
       error: () => (this.loaded = false), // retry next time; chats still work with the default model
     });

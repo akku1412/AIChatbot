@@ -46,7 +46,7 @@ public sealed class ChatController(IChatService chat, IGenerationRegistry genera
     {
         var userId = User.GetUserId();
         using var generation = generations.Start(userId, conversationId);
-        return Ok(await chat.SendAsync(userId, conversationId, request.Content, request.AttachmentIds, cancellationToken));
+        return Ok(await chat.SendAsync(userId, conversationId, request.Content, request.AttachmentIds, cancellationToken, request.WebSearch));
     }
 
     /// <summary>
@@ -66,7 +66,7 @@ public sealed class ChatController(IChatService chat, IGenerationRegistry genera
     {
         var userId = User.GetUserId();
         using var generation = generations.Start(userId, conversationId);
-        var turn = await chat.PrepareTurnAsync(userId, conversationId, request.Content, request.AttachmentIds, cancellationToken);
+        var turn = await chat.PrepareTurnAsync(userId, conversationId, request.Content, request.AttachmentIds, cancellationToken, request.WebSearch);
         await streamer.StreamAsync(Response, turn, generation, cancellationToken);
     }
 
