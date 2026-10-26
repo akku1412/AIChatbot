@@ -77,9 +77,16 @@ export interface UploadedFile {
   contentType: string;
   fileSize: number;
   status: FileStatus;
+  /** While processing: the current step ("Reading scanned pages"); when failed: why. */
   statusMessage: string | null;
+  /** Machine-readable failure reason ("timeout", "unsupported", …). */
+  statusReason?: string | null;
+  /** While processing, e.g. scanned pages read so far / in total. */
+  progressCurrent?: number | null;
+  progressTotal?: number | null;
   pageCount: number | null;
   extractedCharacters: number;
+  isImage?: boolean;
   createdAt: string;
 }
 

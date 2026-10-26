@@ -56,7 +56,7 @@ public sealed partial class ConversationExportService(
             {
                 // AI replies are Markdown: write them as clean plain text (no ** or #). User text is kept as typed.
                 var body = message.Role == MessageRole.Assistant
-                    ? PlainTextRenderer.Render(MarkdownReader.Parse(message.Content))
+                    ? PlainTextRenderer.Render(MarkdownReader.Parse(Files.Citations.Readable(message)))
                     : NormalizeLineBreaks(message.Content);
                 text.Append(body.TrimEnd()).Append("\r\n");
             }

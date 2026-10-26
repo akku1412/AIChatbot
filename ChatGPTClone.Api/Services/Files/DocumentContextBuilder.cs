@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data;
 using ChatGPTClone.Api.Models;
+using ChatGPTClone.Api.Services.Embeddings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -13,17 +14,34 @@ public interface IDocumentContextBuilder
     /// <summary>
     /// Builds the &lt;documents&gt; block for the AI: computed summaries always, then either all text (small files)
     /// or the chunks most relevant to the question (large files), within the configured character budget.
+    /// Null when there are no files.
     /// </summary>
-    Task<string?> BuildAsync(IReadOnlyList<UploadedFile> files, string question, CancellationToken cancellationToken);
+    Task<DocumentContext?> BuildAsync(IReadOnlyList<UploadedFile> files, string question, CancellationToken cancellationToken);
 }
 
 /// <summary>
-/// Simple, dependency-free retrieval: keyword scoring (term frequency × inverse document frequency) over the
-/// stored chunks. Each file gets a fair share of the budget so comparisons across files work. When the
+/// The prompt text plus the passages it contains (ChunkId → relevance score). The AI cites a passage as
+/// [file:ChunkId]; only ids in <see cref="Passages"/> are accepted as sources.
+/// </summary>
+public sealed record DocumentContext(string Text, IReadOnlyDictionary<long, double> Passages);
+
+/// <summary>
+/// Hybrid retrieval over the stored chunks: keyword scoring (term frequency × inverse document frequency) blended with
+/// semantic similarity from the embedding model (Embeddings:VectorWeight), so "how did sales change?" also finds a
+/// passage about "revenue grew 12%". Without embeddings (not configured, not indexed yet, model failure) it is
+/// keyword-only, as before. Each file gets a fair share of the budget so comparisons across files work. When the
 /// question has no distinctive words ("summarize this"), chunks are sampled evenly across each file.
 /// </summary>
-public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<FileUploadOptions> options) : IDocumentContextBuilder
+public sealed partial class DocumentContextBuilder(
+    AppDbContext db,
+    IEmbeddingProvider embeddings,
+    IOptions<FileUploadOptions> options,
+    IOptions<EmbeddingOptions> embeddingOptions,
+    ILogger<DocumentContextBuilder> logger) : IDocumentContextBuilder
 {
+    /// <summary>The citation marker the AI writes, e.g. [file:123].</summary>
+    public const string CitationPrefix = "file:";
+
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "was", "were", "be", "this",
@@ -35,8 +53,9 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
     };
 
     private readonly FileUploadOptions _options = options.Value;
+    private readonly double _vectorWeight = Math.Clamp(embeddingOptions.Value.VectorWeight, 0, 1);
 
-    public async Task<string?> BuildAsync(IReadOnlyList<UploadedFile> files, string question, CancellationToken cancellationToken)
+    public async Task<DocumentContext?> BuildAsync(IReadOnlyList<UploadedFile> files, string question, CancellationToken cancellationToken)
     {
         if (files.Count == 0)
         {
@@ -52,7 +71,11 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
 
         var budget = _options.MaxDocumentContextCharacters;
         var terms = Terms(question);
-        var idf = InverseDocumentFrequency(chunks.Where(c => c.Kind == DocumentChunkKind.Text).ToList(), terms);
+        var textChunks = chunks.Where(c => c.Kind == DocumentChunkKind.Text).ToList();
+        var scores = terms.Count == 0
+            ? new Dictionary<long, double>() // general question: even spread, no ranking
+            : await HybridScoresAsync(textChunks, question, terms, cancellationToken);
+        double ScoreOf(DocumentChunk c) => scores.GetValueOrDefault(c.ChunkId);
 
         // Pass 1: summaries (always), then each file's share of text.
         var selected = new Dictionary<Guid, List<DocumentChunk>>();
@@ -69,9 +92,8 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
         foreach (var file in files)
         {
             var text = (byFile.GetValueOrDefault(file.FileId) ?? []).Where(c => c.Kind == DocumentChunkKind.Text).ToList();
-            var ranked = Rank(text, terms, idf);
             var spent = 0;
-            foreach (var chunk in ranked)
+            foreach (var chunk in Rank(text, ScoreOf))
             {
                 if (spent + chunk.Content.Length <= share)
                 {
@@ -87,7 +109,7 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
         }
 
         // Pass 2: give unused budget to the best remaining chunks of any file.
-        foreach (var chunk in leftovers.OrderByDescending(c => Score(c, terms, idf)))
+        foreach (var chunk in leftovers.OrderByDescending(ScoreOf))
         {
             if (used + chunk.Content.Length <= budget)
             {
@@ -96,7 +118,80 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
             }
         }
 
-        return Format(files, byFile, selected);
+        var passages = selected.Values.SelectMany(l => l).ToDictionary(c => c.ChunkId, ScoreOf);
+        return new DocumentContext(Format(files, byFile, selected), passages);
+    }
+
+    /// <summary>
+    /// Keyword and semantic scores, each scaled to 0..1 over these chunks, blended by VectorWeight. Chunks without a
+    /// vector from the current model get the keyword score only.
+    /// </summary>
+    private async Task<Dictionary<long, double>> HybridScoresAsync(List<DocumentChunk> chunks, string question,
+        IReadOnlyList<string> terms, CancellationToken cancellationToken)
+    {
+        var idf = InverseDocumentFrequency(chunks, terms);
+        var keyword = chunks.ToDictionary(c => c.ChunkId, c => KeywordScore(c, terms, idf));
+        var maxKeyword = keyword.Values.DefaultIfEmpty(0).Max();
+        var result = keyword.ToDictionary(k => k.Key, k => maxKeyword > 0 ? k.Value / maxKeyword : 0);
+
+        var similarity = await SimilaritiesAsync(chunks, question, cancellationToken);
+        if (similarity.Count == 0)
+        {
+            return result;
+        }
+
+        // Min-max scaling: e5 cosines sit in a narrow band (≈0.7–0.9), so raw values would barely move the ranking.
+        var min = similarity.Values.Min();
+        var range = similarity.Values.Max() - min;
+        foreach (var (chunkId, cosine) in similarity)
+        {
+            var semantic = range > 1e-6 ? (cosine - min) / range : 0;
+            result[chunkId] = _vectorWeight * semantic + (1 - _vectorWeight) * result[chunkId];
+        }
+        return result;
+    }
+
+    /// <summary>Cosine similarity of the question to each indexed chunk; empty when semantic search isn't available.</summary>
+    private async Task<Dictionary<long, double>> SimilaritiesAsync(List<DocumentChunk> chunks, string question,
+        CancellationToken cancellationToken)
+    {
+        if (!embeddings.IsAvailable || chunks.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = chunks.Select(c => c.ChunkId).ToList();
+        var model = embeddings.Model;
+        var stored = await db.ChunkEmbeddings.AsNoTracking()
+            .Where(e => ids.Contains(e.ChunkId) && e.Model == model)
+            .Select(e => new { e.ChunkId, e.Vector })
+            .ToListAsync(cancellationToken);
+        if (stored.Count == 0)
+        {
+            return [];
+        }
+
+        float[] query;
+        try
+        {
+            query = (await embeddings.EmbedAsync([question], EmbeddingKind.Query, cancellationToken))[0];
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Embedding the question failed; using keyword search only");
+            return [];
+        }
+
+        var result = new Dictionary<long, double>();
+        foreach (var row in stored)
+        {
+            var vector = Vectors.FromBytes(row.Vector);
+            if (vector.Length == query.Length)
+            {
+                result[row.ChunkId] = Vectors.Cosine(query, vector);
+            }
+        }
+        return result;
     }
 
     private static List<DocumentChunk> TakeWithin(List<DocumentChunk> chunks, int limit, ref int used)
@@ -116,16 +211,15 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
         return taken;
     }
 
-    /// <summary>Most relevant first; with no useful terms, an even spread starting at the beginning.</summary>
-    private static List<DocumentChunk> Rank(List<DocumentChunk> chunks, IReadOnlyList<string> terms, Dictionary<string, double> idf)
+    /// <summary>Most relevant first; with no scores at all, an even spread starting at the beginning.</summary>
+    private static List<DocumentChunk> Rank(List<DocumentChunk> chunks, Func<DocumentChunk, double> score)
     {
         if (chunks.Count == 0)
         {
             return chunks;
         }
 
-        var scored = chunks.Select(c => (Chunk: c, Score: Score(c, terms, idf))).ToList();
-        if (scored.All(s => s.Score == 0))
+        if (chunks.All(c => score(c) == 0))
         {
             // Beginning first (usually the overview), then evenly spaced chunks across the document.
             var order = new List<DocumentChunk> { chunks[0] };
@@ -146,14 +240,13 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
             return order;
         }
 
-        return scored
-            .OrderByDescending(s => s.Score)
-            .ThenBy(s => s.Chunk.ChunkIndex)
-            .Select(s => s.Chunk)
+        return chunks
+            .OrderByDescending(score)
+            .ThenBy(c => c.ChunkIndex)
             .ToList();
     }
 
-    private static double Score(DocumentChunk chunk, IReadOnlyList<string> terms, Dictionary<string, double> idf)
+    private static double KeywordScore(DocumentChunk chunk, IReadOnlyList<string> terms, Dictionary<string, double> idf)
     {
         if (terms.Count == 0)
         {
@@ -220,20 +313,28 @@ public sealed partial class DocumentContextBuilder(AppDbContext db, IOptions<Fil
             foreach (var chunk in chosen)
             {
                 var label = chunk.Kind == DocumentChunkKind.Summary ? $"Computed summary - {chunk.Location}" : chunk.Location;
-                output.Append('[').Append(Escape(label)).Append("]\n").Append(Escape(chunk.Content)).Append("\n\n");
+                if (chunk.Source == ChunkSource.Ocr)
+                {
+                    label += " (read by OCR; may contain recognition errors)";
+                }
+                output.Append($"<passage id=\"{CitationPrefix}{chunk.ChunkId}\" location=\"{EscapeAttribute(label)}\">\n")
+                    .Append(Escape(chunk.Content))
+                    .Append("\n</passage>\n");
             }
             output.Append("</document>\n");
         }
         return output.Append("</documents>").ToString();
     }
 
-    /// <summary>Stops document text from closing or faking our delimiter tags.</summary>
-    private static string Escape(string text) =>
-        text.Replace("</document", "<\\/document", StringComparison.OrdinalIgnoreCase)
-            .Replace("<document", "<\\document", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Stops document text from closing or faking our delimiter tags (&lt;documents&gt;, &lt;document&gt;, &lt;passage&gt;).</summary>
+    internal static string Escape(string text) =>
+        DelimiterTag().Replace(text, m => m.Value.Insert(1, "\\"));
 
     private static string EscapeAttribute(string text) => Escape(text).Replace("\"", "'");
 
     [GeneratedRegex(@"[\p{L}\p{N}][\p{L}\p{N}\-_.]*")]
     private static partial Regex WordPattern();
+
+    [GeneratedRegex(@"</?\s*(documents?|passage)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex DelimiterTag();
 }

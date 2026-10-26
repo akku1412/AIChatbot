@@ -24,6 +24,7 @@ public static class DocumentChunker
                     Kind = section.Kind,
                     Location = pieces.Count == 1 ? section.Location : $"{section.Location} (part {i + 1})",
                     Content = pieces[i],
+                    Source = section.Source,
                 });
             }
         }

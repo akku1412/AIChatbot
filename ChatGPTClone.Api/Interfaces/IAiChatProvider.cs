@@ -3,7 +3,11 @@ using ChatGPTClone.Api.Models;
 
 namespace ChatGPTClone.Api.Interfaces;
 
-public sealed record AiChatMessage(MessageRole Role, string Content);
+/// <summary>One prompt message. Images (user messages only) are sent to the provider's vision model.</summary>
+public sealed record AiChatMessage(MessageRole Role, string Content, IReadOnlyList<AiImage>? Images = null);
+
+/// <summary>An image for the AI to look at (already cleaned: re-encoded, metadata removed).</summary>
+public sealed record AiImage(byte[] Data, string ContentType);
 
 public sealed record AiCompletion(string Content, int? TotalTokens, bool Truncated);
 

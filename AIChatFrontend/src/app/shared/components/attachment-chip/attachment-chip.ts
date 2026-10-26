@@ -49,7 +49,14 @@ export function formatFileSize(bytes: number): string {
         </span>
       }
       @if (state() === 'processing') {
-        <span class="progress indeterminate" aria-hidden="true"><span class="bar"></span></span>
+        @if (progress() > 0) {
+          <span class="progress" role="progressbar" [attr.aria-valuenow]="progress()" aria-valuemin="0" aria-valuemax="100"
+                [attr.aria-label]="'Reading ' + fileName()">
+            <span class="bar" [style.width.%]="progress()"></span>
+          </span>
+        } @else {
+          <span class="progress indeterminate" aria-hidden="true"><span class="bar"></span></span>
+        }
       }
     </div>
   `,
@@ -107,6 +114,8 @@ export class AttachmentChip {
   readonly state = input<ChipState>('ready');
   readonly progress = input(0);
   readonly error = input<string | null>(null);
+  /** While processing: the server's current step, e.g. "Reading scanned pages… 3/12". */
+  readonly detail = input<string | null>(null);
   readonly removable = input(false);
   /** Shows a download button for the original file (sent attachments). */
   readonly downloadable = input(false);
@@ -156,7 +165,7 @@ export class AttachmentChip {
       case 'uploading':
         return `Uploading… ${this.progress()}%`;
       case 'processing':
-        return 'Reading document…';
+        return this.detail() ?? 'Reading document…';
       case 'error':
         return this.error() ?? 'Upload failed';
       default:

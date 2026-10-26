@@ -22,6 +22,32 @@ namespace ChatGPTClone.Api.Data.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.ChunkEmbedding", b =>
+                {
+                    b.Property<long>("ChunkId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Dimensions")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<byte[]>("Vector")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.HasKey("ChunkId");
+
+                    b.ToTable("ChunkEmbeddings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ChunkEmbeddings_Dimensions", "[Dimensions] > 0");
+                        });
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.Conversation", b =>
                 {
                     b.Property<int>("ConversationId")
@@ -93,6 +119,14 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("text");
 
                     b.HasKey("ChunkId");
 
@@ -190,6 +224,35 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .HasDatabaseName("UX_MessageAttachments_MessageId_FileId");
 
                     b.ToTable("MessageAttachments", (string)null);
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.MessageSource", b =>
+                {
+                    b.Property<long>("MessageSourceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("MessageSourceId"));
+
+                    b.Property<long>("ChunkId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("MessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<double>("Score")
+                        .HasColumnType("float");
+
+                    b.HasKey("MessageSourceId");
+
+                    b.HasIndex("ChunkId")
+                        .HasDatabaseName("IX_MessageSources_ChunkId");
+
+                    b.HasIndex("MessageId", "ChunkId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_MessageSources_MessageId_ChunkId");
+
+                    b.ToTable("MessageSources", (string)null);
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.OtpVerification", b =>
@@ -316,9 +379,20 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .IsUnicode(false)
                         .HasColumnType("varchar(20)");
 
+                    b.Property<int?>("ProgressCurrent")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProgressTotal")
+                        .HasColumnType("int");
+
                     b.Property<string>("StatusMessage")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)");
 
                     b.Property<string>("StorageKey")
                         .IsRequired()
@@ -400,6 +474,17 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.ToTable("Users", (string)null);
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.ChunkEmbedding", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.DocumentChunk", "Chunk")
+                        .WithOne("Embedding")
+                        .HasForeignKey("ChatGPTClone.Api.Models.ChunkEmbedding", "ChunkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Chunk");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.Conversation", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
@@ -459,6 +544,25 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("Message");
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.MessageSource", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.DocumentChunk", "Chunk")
+                        .WithMany()
+                        .HasForeignKey("ChunkId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ChatGPTClone.Api.Models.Message", "Message")
+                        .WithMany("Sources")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Chunk");
+
+                    b.Navigation("Message");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.RefreshToken", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
@@ -486,9 +590,16 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("Messages");
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.DocumentChunk", b =>
+                {
+                    b.Navigation("Embedding");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.Message", b =>
                 {
                     b.Navigation("Attachments");
+
+                    b.Navigation("Sources");
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>

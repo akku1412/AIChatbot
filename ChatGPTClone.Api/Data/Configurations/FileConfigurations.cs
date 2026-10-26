@@ -24,6 +24,8 @@ public sealed class UploadedFileConfiguration : IEntityTypeConfiguration<Uploade
             .HasConversion(s => s.ToString().ToLower(), v => Enum.Parse<FileProcessingStatus>(v, true))
             .HasMaxLength(20).IsUnicode(false).IsRequired();
         builder.Property(f => f.StatusMessage).HasMaxLength(500);
+        builder.Property(f => f.StatusReason).HasMaxLength(50).IsUnicode(false);
+        builder.Ignore(f => f.IsImage);
         builder.Property(f => f.CreatedAt).HasColumnType("datetime2(3)");
         builder.Property(f => f.UpdatedAt).HasColumnType("datetime2(3)");
 
@@ -49,6 +51,10 @@ public sealed class DocumentChunkConfiguration : IEntityTypeConfiguration<Docume
             .HasMaxLength(20).IsUnicode(false).IsRequired();
         builder.Property(c => c.Location).HasMaxLength(300).IsRequired();
         builder.Property(c => c.Content).IsRequired(); // nvarchar(max), bounded by MaxExtractedCharacters
+        builder.Property(c => c.Source)
+            .HasConversion(s => s.ToString().ToLower(), v => Enum.Parse<ChunkSource>(v, true))
+            .HasMaxLength(10).IsUnicode(false).IsRequired()
+            .HasDefaultValue(ChunkSource.Text);
 
         builder.HasOne(c => c.File)
             .WithMany(f => f.Chunks)
@@ -56,6 +62,47 @@ public sealed class DocumentChunkConfiguration : IEntityTypeConfiguration<Docume
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(c => new { c.FileId, c.ChunkIndex }).IsUnique().HasDatabaseName("UX_DocumentChunks_FileId_ChunkIndex");
+    }
+}
+
+public sealed class ChunkEmbeddingConfiguration : IEntityTypeConfiguration<ChunkEmbedding>
+{
+    public void Configure(EntityTypeBuilder<ChunkEmbedding> builder)
+    {
+        builder.ToTable("ChunkEmbeddings", t => t.HasCheckConstraint("CK_ChunkEmbeddings_Dimensions", "[Dimensions] > 0"));
+        builder.HasKey(e => e.ChunkId);
+        builder.Property(e => e.ChunkId).ValueGeneratedNever();
+        builder.Property(e => e.Model).HasMaxLength(100).IsUnicode(false).IsRequired();
+        builder.Property(e => e.Vector).IsRequired(); // varbinary(max): SQL Server 2016 has no vector type
+
+        builder.HasOne(e => e.Chunk)
+            .WithOne(c => c.Embedding)
+            .HasForeignKey<ChunkEmbedding>(e => e.ChunkId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class MessageSourceConfiguration : IEntityTypeConfiguration<MessageSource>
+{
+    public void Configure(EntityTypeBuilder<MessageSource> builder)
+    {
+        builder.ToTable("MessageSources");
+        builder.HasKey(s => s.MessageSourceId);
+
+        builder.HasOne(s => s.Message)
+            .WithMany(m => m.Sources)
+            .HasForeignKey(s => s.MessageId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // NO ACTION: second cascade path (Users -> UploadedFiles -> DocumentChunks -> MessageSources).
+        // FileService deletes a file's source rows itself before deleting the file.
+        builder.HasOne(s => s.Chunk)
+            .WithMany()
+            .HasForeignKey(s => s.ChunkId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasIndex(s => new { s.MessageId, s.ChunkId }).IsUnique().HasDatabaseName("UX_MessageSources_MessageId_ChunkId");
+        builder.HasIndex(s => s.ChunkId).HasDatabaseName("IX_MessageSources_ChunkId");
     }
 }
 

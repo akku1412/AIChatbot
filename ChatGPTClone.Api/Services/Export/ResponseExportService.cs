@@ -24,7 +24,8 @@ public sealed class ResponseExportService(IMessageRepository messages, ILogger<R
 
         var title = message.Conversation.Title;
         var context = new ExportContext(title, message.CreatedAt);
-        var blocks = MarkdownReader.Parse(message.Content);
+        // Citation markers [file:123] become "(report.pdf, Page 3)".
+        var blocks = MarkdownReader.Parse(Files.Citations.Readable(message));
 
         byte[] content;
         try

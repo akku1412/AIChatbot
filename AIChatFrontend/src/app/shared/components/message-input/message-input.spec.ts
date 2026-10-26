@@ -154,6 +154,67 @@ describe('MessageInput', () => {
     expect(fixture.nativeElement.querySelector('app-attachment-chip')).toBeNull();
   });
 
+  describe('background processing (OCR)', () => {
+    const file = (status: string, extra: object = {}) => ({
+      fileId: 'f9', fileName: 'scan.pdf', fileExtension: '.pdf', contentType: 'application/pdf', fileSize: 13,
+      status, statusMessage: null, progressCurrent: null, progressTotal: null, pageCount: null,
+      extractedCharacters: 0, isImage: false, createdAt: '', ...extra,
+    });
+    const meta = () => (fixture.nativeElement.querySelector('app-attachment-chip .meta') as HTMLElement).textContent?.trim();
+    const poll = () => http.expectOne((req) => req.method === 'GET' && req.url.endsWith('/files/f9'));
+
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    function uploadProcessing(): void {
+      pick(pdf('scan.pdf'));
+      http.expectOne((req) => req.url.endsWith('/files/upload')).flush(file('processing'));
+      fixture.detectChanges();
+    }
+
+    it('polls until the file is read, showing scanned-page progress, then allows sending', () => {
+      uploadProcessing();
+      type('what does it say?');
+      expect(meta()).toBe('Reading document…');
+
+      vi.advanceTimersByTime(1000);
+      poll().flush(file('processing', { statusMessage: 'Reading scanned pages', progressCurrent: 3, progressTotal: 12 }));
+      fixture.detectChanges();
+      expect(meta()).toBe('Reading scanned pages… 3/12');
+      expect(fixture.nativeElement.querySelector('app-attachment-chip [role=progressbar]').getAttribute('aria-valuenow')).toBe('25');
+      press({});
+      expect(sent).toEqual([]); // not ready yet
+
+      vi.advanceTimersByTime(1000);
+      poll().flush(file('completed', { pageCount: 12 }));
+      fixture.detectChanges();
+      press({});
+      expect(sent.length).toBe(1);
+      expect(sent[0].attachments[0].fileId).toBe('f9');
+
+      vi.advanceTimersByTime(5000);
+      http.expectNone((req) => req.url.endsWith('/files/f9')); // polling stopped
+    });
+
+    it('shows the server reason when processing fails', () => {
+      uploadProcessing();
+      vi.advanceTimersByTime(1000);
+      poll().flush(file('failed', { statusMessage: 'This file took too long to process.', statusReason: 'timeout' }));
+      fixture.detectChanges();
+      expect(meta()).toBe('This file took too long to process.');
+      expect(fixture.nativeElement.querySelector('.hint .over')).not.toBeNull();
+    });
+
+    it('removing a file while it is processing stops polling and deletes it', () => {
+      uploadProcessing();
+      (fixture.nativeElement.querySelector('app-attachment-chip .remove') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      http.expectOne((req) => req.method === 'DELETE' && req.url.endsWith('/files/f9')).flush(null);
+      vi.advanceTimersByTime(5000);
+      http.expectNone((req) => req.method === 'GET' && req.url.endsWith('/files/f9'));
+    });
+  });
+
   it('removing a file mid-upload cancels the request', () => {
     pick(pdf());
     const upload = http.expectOne((req) => req.url.endsWith('/files/upload'));

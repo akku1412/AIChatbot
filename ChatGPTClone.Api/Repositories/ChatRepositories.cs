@@ -74,6 +74,7 @@ public sealed class MessageRepository(AppDbContext db) : IMessageRepository
         }
         return await db.Messages.AsNoTracking()
             .Include(m => m.Attachments).ThenInclude(a => a.File)
+            .Include(m => m.Sources).ThenInclude(s => s.Chunk).ThenInclude(c => c.File)
             .Where(m => messageIds.Contains(m.MessageId))
             .OrderBy(m => m.MessageId)
             .AsSplitQuery()
@@ -99,6 +100,7 @@ public sealed class MessageRepository(AppDbContext db) : IMessageRepository
         db.Messages.AsNoTracking()
             .Include(m => m.Conversation)
             .Include(m => m.Attachments).ThenInclude(a => a.File)
+            .Include(m => m.Sources).ThenInclude(s => s.Chunk).ThenInclude(c => c.File)
             .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.MessageId == messageId && m.Conversation.UserId == userId, cancellationToken);
 

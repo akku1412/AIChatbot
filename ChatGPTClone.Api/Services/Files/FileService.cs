@@ -10,7 +10,10 @@ namespace ChatGPTClone.Api.Services.Files;
 
 public interface IFileService
 {
-    /// <summary>Validates, stores and extracts the file; returns it as Completed or throws ApiException.</summary>
+    /// <summary>
+    /// Validates (size, type, real format from the bytes) and stores the file privately, then queues it for background
+    /// processing. Returns status "processing"; poll GET /api/files/{id} until "completed" or "failed".
+    /// </summary>
     Task<UploadedFileDto> UploadAsync(int userId, IFormFile file, CancellationToken cancellationToken);
 
     Task<UploadedFileDto> GetAsync(int userId, Guid fileId, CancellationToken cancellationToken);
@@ -21,6 +24,9 @@ public interface IFileService
 
     /// <summary>The original bytes of the user's file, with its original name and verified content type. 404 otherwise.</summary>
     Task<FileDownload> OpenDownloadAsync(int userId, Guid fileId, CancellationToken cancellationToken);
+
+    /// <summary>One extracted passage of the user's file (what a citation points at). 404 otherwise.</summary>
+    Task<ChunkDto> GetChunkAsync(int userId, Guid fileId, long chunkId, CancellationToken cancellationToken);
 
     /// <summary>The user's files with these ids, all Completed; throws 404/409 otherwise.</summary>
     Task<List<UploadedFile>> GetReadyFilesAsync(int userId, IReadOnlyCollection<Guid> fileIds, CancellationToken cancellationToken);
@@ -34,14 +40,14 @@ public sealed record FileDownload(Stream Content, string ContentType, string Fil
 public sealed class FileService(
     AppDbContext db,
     IFileStorage storage,
-    IEnumerable<IDocumentExtractor> extractors,
+    IDocumentProcessingQueue queue,
     IOptions<FileUploadOptions> options,
     ILogger<FileService> logger) : IFileService
 {
-    private static readonly TimeSpan ProcessingTimeout = TimeSpan.FromSeconds(60);
     private readonly FileUploadOptions _options = options.Value;
 
-    public UploadLimitsDto Limits => new(_options.MaxFileSizeBytes, _options.MaxFilesPerMessage, FileSignature.Supported.Keys.ToList());
+    public UploadLimitsDto Limits => new(_options.MaxFileSizeBytes, _options.MaxFilesPerMessage,
+        FileSignature.Supported.Keys.ToList(), _options.MaxImageSizeBytes, FileTypes.ImageExtensions.ToList());
 
     public async Task<UploadedFileDto> UploadAsync(int userId, IFormFile file, CancellationToken cancellationToken)
     {
@@ -50,27 +56,56 @@ public sealed class FileService(
         {
             throw Problem(400, "Empty file", "The file is empty.", "empty");
         }
-        if (file.Length > _options.MaxFileSizeBytes)
-        {
-            throw Problem(413, "File too large",
-                $"Files can be at most {_options.MaxFileSizeBytes / (1024 * 1024)} MB.", "too_large");
-        }
 
         var displayName = SanitizeFileName(file.FileName);
         var extension = Path.GetExtension(displayName).ToLowerInvariant();
+        if (extension == ".doc")
+        {
+            throw Problem(415, "Old Word format",
+                "Word 97–2003 (.doc) files aren't supported. Open the file in Word, choose File → Save As → Word Document (.docx), and upload that.",
+                "doc_not_supported");
+        }
         if (!FileSignature.Supported.TryGetValue(extension, out var format))
         {
             throw Problem(415, "Unsupported file type",
-                "Only PDF (.pdf), Word (.docx), Excel (.xlsx, .xls) and text (.txt) files are supported.", "unsupported");
+                "Supported files: PDF, Word (.docx), Excel (.xlsx, .xls), CSV, PowerPoint (.pptx), text (.txt) and images (PNG, JPG, WebP).",
+                "unsupported");
         }
 
-        // ---- Store under a random name, then verify the real format from the bytes ----
-        string storageKey;
-        await using (var upload = file.OpenReadStream())
+        var isImage = FileTypes.IsImage(extension);
+        var limit = isImage ? _options.MaxImageSizeBytes : _options.MaxFileSizeBytes;
+        if (file.Length > limit)
         {
-            storageKey = await storage.SaveAsync(upload, cancellationToken);
+            throw Problem(413, "File too large",
+                $"{(isImage ? "Images" : "Files")} can be at most {limit / (1024 * 1024)} MB.", "too_large");
         }
 
+        // ---- Verify the real format from the bytes; images are cleaned (metadata removed) before they are stored ----
+        await using var upload = file.OpenReadStream();
+        using var bytes = new MemoryStream();
+        await upload.CopyToAsync(bytes, cancellationToken);
+        bytes.Position = 0;
+
+        var mismatch = FileSignature.Validate(bytes, extension);
+        if (mismatch is not null)
+        {
+            throw Problem(415, "Invalid file", $"{mismatch} Make sure the file isn't damaged or renamed.", "invalid_format");
+        }
+
+        Stream toStore = bytes;
+        if (isImage)
+        {
+            try
+            {
+                toStore = new MemoryStream(ImageProcessor.Clean(bytes.ToArray(), extension).Bytes);
+            }
+            catch (DocumentExtractionException ex)
+            {
+                throw Problem(422, "Couldn't read this image", ex.Message, ex.Reason);
+            }
+        }
+
+        var storageKey = await storage.SaveAsync(toStore, cancellationToken);
         var record = new UploadedFile
         {
             FileId = Guid.NewGuid(),
@@ -79,61 +114,30 @@ public sealed class FileService(
             StorageKey = storageKey,
             ContentType = format.ContentType, // from the verified format, never from the client
             FileExtension = extension,
-            FileSize = file.Length,
-            ProcessingStatus = FileProcessingStatus.Uploaded,
+            FileSize = toStore.Length,
+            ProcessingStatus = FileProcessingStatus.Processing,
+            StatusMessage = "Waiting to be read",
         };
 
         try
         {
-            await using (var stored = storage.OpenRead(storageKey))
-            {
-                var mismatch = FileSignature.Validate(stored, extension);
-                if (mismatch is not null)
-                {
-                    throw Problem(415, "Invalid file", $"{mismatch} Make sure the file isn't damaged or renamed.", "invalid_format");
-                }
-            }
-
-            record.ProcessingStatus = FileProcessingStatus.Processing;
             db.UploadedFiles.Add(record);
             await db.SaveChangesAsync(cancellationToken);
-
-            var result = await ExtractAsync(storageKey, extension, cancellationToken);
-            var chunks = DocumentChunker.Chunk(record.FileId, result.Sections, _options.ChunkCharacters);
-
-            db.DocumentChunks.AddRange(chunks);
-            record.ProcessingStatus = FileProcessingStatus.Completed;
-            record.PageCount = result.PageCount;
-            record.ExtractedCharacters = result.Sections.Sum(s => s.Text.Length);
-            record.StatusMessage = result.Warning;
-            await db.SaveChangesAsync(cancellationToken);
-
-            logger.LogInformation("File {FileId} ({Extension}, {Size} bytes) processed into {Chunks} chunks for user {UserId}",
-                record.FileId, extension, file.Length, chunks.Count, userId);
-            return UploadedFileDto.From(record);
         }
-        catch (Exception ex)
+        catch
         {
-            // Failed uploads are removed completely (file + metadata): nothing half-processed is left behind.
-            await CleanUpFailedAsync(record, storageKey);
-
-            if (ex is DocumentExtractionException extraction)
-            {
-                logger.LogInformation("File upload rejected for user {UserId}: {Reason}", userId, extraction.Reason);
-                throw Problem(422, "Couldn't read this file", extraction.Message, extraction.Reason);
-            }
-            if (ex is ApiException or OperationCanceledException)
-            {
-                throw;
-            }
-
-            logger.LogError(ex, "Processing upload failed for user {UserId}", userId);
-            throw Problem(500, "Upload failed", "We couldn't process this file. Please try again.", "processing_failed");
+            await storage.DeleteAsync(storageKey);
+            throw;
         }
+
+        queue.Enqueue(new DocumentJob(record.FileId, DocumentJobKind.Process));
+        logger.LogInformation("File {FileId} ({Extension}, {Size} bytes) uploaded by user {UserId}; queued for processing",
+            record.FileId, extension, record.FileSize, userId);
+        return UploadedFileDto.From(record);
     }
 
     public async Task<UploadedFileDto> GetAsync(int userId, Guid fileId, CancellationToken cancellationToken) =>
-        UploadedFileDto.From(await GetOwnedAsync(userId, fileId, cancellationToken));
+        UploadedFileDto.From(await GetOwnedAsync(userId, fileId, cancellationToken, track: false));
 
     public async Task<IReadOnlyList<UploadedFileDto>> ListAsync(int userId, int take, CancellationToken cancellationToken) =>
         (await db.UploadedFiles.AsNoTracking()
@@ -148,9 +152,10 @@ public sealed class FileService(
     {
         var file = await GetOwnedAsync(userId, fileId, cancellationToken);
 
-        // Attachment links use NO ACTION (SQL Server multiple-cascade-path rule), so remove them first.
+        // Attachment and citation links use NO ACTION (SQL Server multiple-cascade-path rule), so remove them first.
         await db.MessageAttachments.Where(a => a.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
-        db.UploadedFiles.Remove(file); // chunks cascade
+        await db.MessageSources.Where(s => s.Chunk.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
+        db.UploadedFiles.Remove(file); // chunks and their embeddings cascade
         await db.SaveChangesAsync(cancellationToken);
 
         try
@@ -163,6 +168,17 @@ public sealed class FileService(
             logger.LogWarning(ex, "Could not delete stored blob for file {FileId}", fileId);
         }
         logger.LogInformation("File {FileId} deleted by user {UserId}", fileId, userId);
+    }
+
+    public async Task<ChunkDto> GetChunkAsync(int userId, Guid fileId, long chunkId, CancellationToken cancellationToken)
+    {
+        var chunk = await db.DocumentChunks.AsNoTracking()
+            .Where(c => c.ChunkId == chunkId && c.FileId == fileId && c.File.UserId == userId)
+            .Select(c => new ChunkDto(c.ChunkId, c.FileId, c.File.OriginalFileName, c.Location, c.Content,
+                c.Source.ToString().ToLower(), c.Kind == DocumentChunkKind.Summary))
+            .FirstOrDefaultAsync(cancellationToken);
+        // Same 404 for "doesn't exist", "belongs to another file" and "belongs to another user".
+        return chunk ?? throw Problem(404, "Source not found", "This source passage doesn't exist or has been deleted.", "chunk_not_found");
     }
 
     public async Task<List<UploadedFile>> GetReadyFilesAsync(int userId, IReadOnlyCollection<Guid> fileIds, CancellationToken cancellationToken)
@@ -183,56 +199,19 @@ public sealed class FileService(
         var notReady = files.FirstOrDefault(f => f.ProcessingStatus != FileProcessingStatus.Completed);
         if (notReady is not null)
         {
-            throw Problem(409, "File not ready", $"\"{notReady.OriginalFileName}\" isn't ready yet. Wait for it to finish processing.", "file_not_ready");
+            throw notReady.ProcessingStatus == FileProcessingStatus.Failed
+                ? Problem(409, "File can't be used", $"\"{notReady.OriginalFileName}\" couldn't be read: {notReady.StatusMessage}", "file_failed")
+                : Problem(409, "File not ready", $"\"{notReady.OriginalFileName}\" isn't ready yet. Wait for it to finish processing.", "file_not_ready");
         }
         return files;
     }
 
-    private async Task<ExtractionResult> ExtractAsync(string storageKey, string extension, CancellationToken cancellationToken)
-    {
-        var extractor = extractors.FirstOrDefault(e => e.CanHandle(extension))
-            ?? throw Problem(415, "Unsupported file type", "This file type can't be read.", "unsupported");
-        var limits = new ExtractionLimits(_options.MaxExtractedCharacters, _options.MaxRowsPerSheet);
-
-        // Parsers are synchronous CPU work: run off the request thread and bound the time.
-        var work = Task.Run(() =>
-        {
-            using var stream = storage.OpenRead(storageKey);
-            return extractor.Extract(stream, extension, limits);
-        }, cancellationToken);
-
-        var finished = await Task.WhenAny(work, Task.Delay(ProcessingTimeout, cancellationToken));
-        if (finished != work)
-        {
-            throw Problem(422, "Processing timed out",
-                "This file took too long to process. Try a smaller file or split it into parts.", "timeout");
-        }
-        return await work;
-    }
-
-    private async Task CleanUpFailedAsync(UploadedFile record, string storageKey)
-    {
-        try
-        {
-            if (db.Entry(record).State != EntityState.Detached)
-            {
-                db.ChangeTracker.Clear();
-                await db.UploadedFiles.Where(f => f.FileId == record.FileId).ExecuteDeleteAsync();
-            }
-            await storage.DeleteAsync(storageKey);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Cleanup after failed upload {FileId} was incomplete", record.FileId);
-        }
-    }
-
     public async Task<FileDownload> OpenDownloadAsync(int userId, Guid fileId, CancellationToken cancellationToken)
     {
-        var file = await GetOwnedAsync(userId, fileId, cancellationToken);
-        if (file.ProcessingStatus != FileProcessingStatus.Completed)
+        var file = await GetOwnedAsync(userId, fileId, cancellationToken, track: false);
+        if (file.ProcessingStatus == FileProcessingStatus.Failed)
         {
-            throw Problem(409, "File not ready", "This file is still being processed. Try again in a moment.", "not_ready");
+            throw Problem(404, "File not found", "This file couldn't be processed and is no longer stored.", "file_failed");
         }
 
         try
@@ -247,10 +226,13 @@ public sealed class FileService(
         }
     }
 
-    private async Task<UploadedFile> GetOwnedAsync(int userId, Guid fileId, CancellationToken cancellationToken) =>
-        await db.UploadedFiles.FirstOrDefaultAsync(f => f.FileId == fileId && f.UserId == userId, cancellationToken)
-        // 404 for other users' files too: ids reveal nothing.
-        ?? throw Problem(404, "File not found", "This file doesn't exist or has been deleted.", "file_not_found");
+    private async Task<UploadedFile> GetOwnedAsync(int userId, Guid fileId, CancellationToken cancellationToken, bool track = true)
+    {
+        var query = track ? db.UploadedFiles : db.UploadedFiles.AsNoTracking();
+        return await query.FirstOrDefaultAsync(f => f.FileId == fileId && f.UserId == userId, cancellationToken)
+            // 404 for other users' files too: ids reveal nothing.
+            ?? throw Problem(404, "File not found", "This file doesn't exist or has been deleted.", "file_not_found");
+    }
 
     /// <summary>Keeps only a safe display name (no path parts, no control characters, bounded length).</summary>
     internal static string SanitizeFileName(string? fileName)

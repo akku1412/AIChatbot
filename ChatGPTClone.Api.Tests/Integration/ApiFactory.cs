@@ -8,6 +8,7 @@ using ChatGPTClone.Api.Data;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services;
+using ChatGPTClone.Api.Services.Embeddings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -37,6 +38,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     /// <summary>Small limit so the "too large" path is cheap to test.</summary>
     public const long MaxFileSize = 1024 * 1024;
 
+    /// <summary>Images have their own (smaller) limit.</summary>
+    public const long MaxImageSize = 300 * 1024;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -54,14 +58,19 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("RateLimits:UploadsPerMinute", "100000");
         builder.UseSetting("FileUploads:StoragePath", StoragePath);
         builder.UseSetting("FileUploads:MaxFileSizeBytes", MaxFileSize.ToString());
+        builder.UseSetting("FileUploads:MaxImageSizeBytes", MaxImageSize.ToString());
 
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<IGoogleTokenValidator, FakeGoogleTokenValidator>();
             services.AddSingleton<IEmailSender>(Email);
             services.AddSingleton<IAiChatProvider>(Ai);
+            // The real 118 MB model is exercised by RetrievalQualityTests only; everything else uses this fake.
+            services.AddSingleton<IEmbeddingProvider>(Embeddings);
         });
     }
+
+    public FakeEmbeddingProvider Embeddings { get; } = new();
 
     public async Task InitializeAsync()
     {
@@ -151,9 +160,16 @@ public sealed class FakeAiProvider : IAiChatProvider
 
         Prompts.Add(messages);
         LastPrompt = messages; // the answer prompt, not the title prompt
+        if (Reply is { } reply)
+        {
+            return Task.FromResult(new AiCompletion(reply(messages), 42, false));
+        }
         var lastUser = messages.Last(m => m.Role == MessageRole.User).Content;
         return Task.FromResult(new AiCompletion($"**Echo:** {lastUser}", 42, false));
     }
+
+    /// <summary>When set, the reply text instead of the echo (e.g. a reply that cites passages). Reset after use.</summary>
+    public Func<IReadOnlyList<AiChatMessage>, string>? Reply { get; set; }
 
     // ----- Streaming controls (reset by ResetStreaming) -----
 
@@ -201,6 +217,52 @@ public sealed class FakeAiProvider : IAiChatProvider
     }
 }
 
+/// <summary>
+/// Deterministic, dependency-free embeddings: hashed bag of words (lower-cased), plus a tiny synonym table so tests
+/// can prove that semantic ranking finds a passage sharing no keyword with the question ("sales" ~ "revenue").
+/// </summary>
+public sealed partial class FakeEmbeddingProvider : IEmbeddingProvider
+{
+    private const int Dimensions = 64;
+    private static readonly Dictionary<string, string> Synonyms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["sales"] = "revenue", ["income"] = "revenue", ["earnings"] = "revenue", ["grew"] = "increase",
+        ["change"] = "increase", ["rose"] = "increase", ["staff"] = "employees", ["workers"] = "employees",
+    };
+
+    public bool IsAvailable { get; set; } = true;
+    public string Model => "fake-test-model";
+    public int Calls;
+
+    /// <summary>When set, EmbedAsync throws (simulates a model failure).</summary>
+    public bool Fail { get; set; }
+
+    public Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, EmbeddingKind kind, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref Calls);
+        if (Fail)
+        {
+            throw new InvalidOperationException("simulated embedding failure");
+        }
+        return Task.FromResult(texts.Select(Embed).ToArray());
+    }
+
+    private static float[] Embed(string text)
+    {
+        var vector = new float[Dimensions];
+        foreach (Match word in Word().Matches(text.ToLowerInvariant()))
+        {
+            var token = Synonyms.GetValueOrDefault(word.Value, word.Value);
+            vector[(int)((uint)StringComparer.Ordinal.GetHashCode(token) % Dimensions)] += 1;
+        }
+        vector[0] += 0.01f; // never all zeros
+        return Vectors.Normalize(vector);
+    }
+
+    [GeneratedRegex(@"\p{L}{3,}")]
+    private static partial Regex Word();
+}
+
 /// <summary>Signs users in through the real endpoints.</summary>
 public static class TestAuth
 {
@@ -229,8 +291,46 @@ public static class TestAuth
     public static Task<HttpResponseMessage> GoogleAsync(HttpClient client, string sub, string email, string name = "Google User") =>
         client.PostAsJsonAsync("/api/auth/google", new { idToken = $"google|{sub}|{email}|{name}" });
 
-    /// <summary>POST /api/files/upload with one file in the "file" form field.</summary>
-    public static Task<HttpResponseMessage> UploadAsync(HttpClient client, string token, string fileName, byte[] content)
+    /// <summary>
+    /// POST /api/files/upload, then (when accepted) polls GET /api/files/{id} until background processing has finished.
+    /// The returned response keeps the upload's status code (201) with the file's final JSON ("completed" or "failed").
+    /// </summary>
+    public static async Task<HttpResponseMessage> UploadAsync(HttpClient client, string token, string fileName, byte[] content)
+    {
+        var response = await UploadRawAsync(client, token, fileName, content);
+        if (response.StatusCode != System.Net.HttpStatusCode.Created)
+        {
+            return response;
+        }
+
+        var file = await WaitForProcessingAsync(client, token,
+            (await response.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("fileId").GetGuid());
+        return new HttpResponseMessage(response.StatusCode) { Content = JsonContent.Create(file, options: Json) };
+    }
+
+    /// <summary>Polls the file until it is no longer "processing" (OCR of a few pages takes seconds).</summary>
+    public static async Task<JsonElement> WaitForProcessingAsync(HttpClient client, string token, Guid fileId, int timeoutSeconds = 90)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (true)
+        {
+            var get = await client.SendAsync(Authorized(HttpMethod.Get, $"/api/files/{fileId}", token));
+            get.EnsureSuccessStatusCode();
+            var file = await get.Content.ReadFromJsonAsync<JsonElement>(Json);
+            if (file.GetProperty("status").GetString() != "processing")
+            {
+                return file;
+            }
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"File {fileId} was still processing after {timeoutSeconds} s.");
+            }
+            await Task.Delay(100);
+        }
+    }
+
+    /// <summary>POST /api/files/upload with one file in the "file" form field; returns as soon as the server accepts it.</summary>
+    public static Task<HttpResponseMessage> UploadRawAsync(HttpClient client, string token, string fileName, byte[] content)
     {
         var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(content);

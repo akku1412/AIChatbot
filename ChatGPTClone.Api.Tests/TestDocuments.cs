@@ -2,6 +2,9 @@ using ClosedXML.Excel;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using SkiaSharp;
+using A = DocumentFormat.OpenXml.Drawing;
+using P = DocumentFormat.OpenXml.Presentation;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Fonts.Standard14Fonts;
@@ -28,6 +31,105 @@ public static class TestDocuments
             }
         }
         return builder.Build();
+    }
+
+    /// <summary>A real "scan": every page is a picture of text (no text layer), so only OCR can read it.</summary>
+    public static byte[] ScannedPdf(params string[][] pages)
+    {
+        var builder = new PdfDocumentBuilder();
+        foreach (var lines in pages)
+        {
+            var page = builder.AddPage(UglyToad.PdfPig.Content.PageSize.A4);
+            page.AddPng(TextPng(lines), new PdfRectangle(0, 0, 595, 842));
+        }
+        return builder.Build();
+    }
+
+    /// <summary>Black text on white, large enough for OCR (like a screenshot or photographed page).</summary>
+    public static byte[] TextPng(IReadOnlyList<string> lines, int width = 1240, int height = 1754)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.White);
+            using var font = new SKFont(SKTypeface.FromFamilyName("Arial"), 44);
+            using var paint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
+            var y = 140f;
+            foreach (var line in lines)
+            {
+                canvas.DrawText(line, 80, y, font, paint);
+                y += 80;
+            }
+        }
+        using var data = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
+    /// <summary>A JPEG carrying EXIF metadata (with a recognisable marker, like a phone photo's GPS position).</summary>
+    public static byte[] JpegWithExif(string marker, int width = 400, int height = 300)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.SkyBlue);
+        }
+        using var data = bitmap.Encode(SKEncodedImageFormat.Jpeg, 90);
+        var jpeg = data.ToArray();
+
+        // APP1 "Exif" segment with a minimal little-endian TIFF header followed by the marker text.
+        var payload = "Exif\0\0"u8.ToArray().Concat(new byte[] { 0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00 })
+            .Concat(System.Text.Encoding.ASCII.GetBytes(marker)).ToArray();
+        var length = payload.Length + 2;
+        byte[] app1 = [0xFF, 0xE1, (byte)(length >> 8), (byte)(length & 0xFF), .. payload];
+        return [.. jpeg[..2], .. app1, .. jpeg[2..]]; // right after the SOI marker
+    }
+
+    /// <summary>A PNG of random pixels (incompressible, so its size is predictable).</summary>
+    public static byte[] NoisePng(int width, int height)
+    {
+        var random = new Random(42);
+        using var bitmap = new SKBitmap(width, height);
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                bitmap.SetPixel(x, y, new SKColor((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256)));
+            }
+        }
+        using var data = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
+    /// <summary>A .pptx: one slide per entry (title + bullet lines) with optional speaker notes.</summary>
+    public static byte[] Pptx(params (string Title, string[] Lines, string? Notes)[] slides)
+    {
+        using var stream = new MemoryStream();
+        using (var document = PresentationDocument.Create(stream, PresentationDocumentType.Presentation))
+        {
+            var presentationPart = document.AddPresentationPart();
+            var slideIds = new P.SlideIdList();
+            uint id = 256;
+            foreach (var (title, lines, notes) in slides)
+            {
+                var slidePart = presentationPart.AddNewPart<SlidePart>();
+                slidePart.Slide = new P.Slide(new P.CommonSlideData(new P.ShapeTree(
+                    TextShape([title]),
+                    TextShape(lines))));
+                if (notes is not null)
+                {
+                    var notesPart = slidePart.AddNewPart<NotesSlidePart>();
+                    notesPart.NotesSlide = new P.NotesSlide(new P.CommonSlideData(new P.ShapeTree(TextShape([notes]))));
+                }
+                slideIds.Append(new P.SlideId { Id = id++, RelationshipId = presentationPart.GetIdOfPart(slidePart) });
+            }
+            presentationPart.Presentation = new P.Presentation(slideIds, new P.SlideSize { Cx = 9144000, Cy = 6858000 },
+                new P.NotesSize { Cx = 6858000, Cy = 9144000 });
+        }
+        return stream.ToArray();
+
+        static P.Shape TextShape(IEnumerable<string> lines) =>
+            new(new P.TextBody(new OpenXmlElement[] { new A.BodyProperties() }
+                .Concat(lines.Select(l => new A.Paragraph(new A.Run(new A.Text(l)))))));
     }
 
     /// <summary>A PDF whose pages contain only drawings (like a scanned document: no text layer).</summary>

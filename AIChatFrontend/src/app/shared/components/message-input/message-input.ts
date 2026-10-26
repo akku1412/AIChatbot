@@ -16,7 +16,7 @@ import { Subscription } from 'rxjs';
 
 import { errorMessage } from '../../../core/http/api-error';
 import { AttachmentInfo, MAX_MESSAGE_LENGTH, UploadedFile } from '../../../core/models/chat.models';
-import { FileApiService } from '../../../core/services/file-api.service';
+import { FileApiService, isProcessing, processingLabel } from '../../../core/services/file-api.service';
 import { AttachmentChip, ChipState, formatFileSize } from '../attachment-chip/attachment-chip';
 import { NotificationService } from '../toast/notification.service';
 
@@ -32,6 +32,8 @@ interface PendingAttachment {
   state: ChipState;
   progress: number;
   error: string | null;
+  /** While the server reads the file: its current step, e.g. "Reading scanned pages… 3/12". */
+  detail: string | null;
   uploaded: UploadedFile | null;
   subscription: Subscription | null;
 }
@@ -229,25 +231,56 @@ export class MessageInput {
     const id = this.nextId++;
     this.attachments.update((list) => [
       ...list,
-      { id, file, state: 'uploading', progress: 0, error: null, uploaded: null, subscription: null },
+      { id, file, state: 'uploading', progress: 0, error: null, detail: null, uploaded: null, subscription: null },
     ]);
 
     const subscription = this.fileApi.upload(file).subscribe({
       next: (event) => {
         if (event.type === HttpEventType.UploadProgress) {
           const progress = event.total ? Math.round((event.loaded / event.total) * 100) : 0;
-          // All bytes sent: the server is now reading the document.
-          this.patch(id, progress >= 100 ? { state: 'processing', progress: 100 } : { progress });
+          // All bytes sent: the server is now storing and checking the document.
+          this.patch(id, progress >= 100 ? { state: 'processing', progress: 0 } : { progress });
         } else if (event.type === HttpEventType.Response && event.body) {
           const uploaded = event.body;
-          this.patch(id, uploaded.status === 'completed'
-            ? { state: 'ready', uploaded, subscription: null }
-            : { state: 'error', error: uploaded.statusMessage ?? 'This file could not be read.', subscription: null });
+          if (isProcessing(uploaded)) {
+            // Stored; the server reads it in the background. Keep "uploaded" so removing it deletes it.
+            this.patch(id, { state: 'processing', ...this.processingState(uploaded), uploaded });
+            this.watchProcessing(id, uploaded.fileId);
+          } else {
+            this.finish(id, uploaded);
+          }
         }
       },
       error: (err: unknown) => this.patch(id, { state: 'error', error: errorMessage(err), subscription: null }),
     });
+    // A synchronous "processing" response may already have replaced the subscription with the watcher.
+    if (this.attachments().find((a) => a.id === id)?.subscription == null) {
+      this.patch(id, { subscription });
+    }
+  }
+
+  private watchProcessing(id: number, fileId: string): void {
+    const subscription = this.fileApi.watch(fileId).subscribe({
+      next: (file) =>
+        isProcessing(file) ? this.patch(id, this.processingState(file)) : this.finish(id, file),
+      error: (err: unknown) => this.patch(id, { state: 'error', error: errorMessage(err), subscription: null }),
+    });
     this.patch(id, { subscription });
+  }
+
+  private finish(id: number, file: UploadedFile): void {
+    this.patch(id, file.status === 'completed'
+      ? { state: 'ready', uploaded: file, detail: null, subscription: null }
+      : { state: 'error', error: file.statusMessage ?? 'This file could not be read.', detail: null, subscription: null });
+  }
+
+  /** Step label and, when the server counts (e.g. scanned pages), a percentage for the chip's bar. */
+  private processingState(file: UploadedFile): Pick<PendingAttachment, 'detail' | 'progress'> {
+    const total = file.progressTotal ?? 0;
+    return {
+      detail: processingLabel(file),
+      progress: total > 0 ? Math.round(((file.progressCurrent ?? 0) / total) * 100) : 0,
+    };
   }
 
   private patch(id: number, changes: Partial<PendingAttachment>): void {

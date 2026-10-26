@@ -14,7 +14,7 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next, IWebHostEnvi
         // Angular emits component styles inline, so inline styles must be allowed.
         "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com; " +
-        "img-src 'self' data: https://*.googleusercontent.com; " +
+        "img-src 'self' data: blob: https://*.googleusercontent.com; " +
         "base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
 
     public Task InvokeAsync(HttpContext context)

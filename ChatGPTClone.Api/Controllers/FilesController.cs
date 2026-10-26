@@ -20,8 +20,9 @@ namespace ChatGPTClone.Api.Controllers;
 public sealed class FilesController(IFileService files) : ControllerBase
 {
     /// <summary>
-    /// Uploads one file (multipart/form-data, field "file"). The file is validated (size, type, real format),
-    /// stored privately and its text extracted; the response has status "completed" when it can be used.
+    /// Uploads one file (multipart/form-data, field "file"). The file is validated (size, type, real format) and
+    /// stored privately; images are cleaned (metadata removed, resized). Text is extracted in the background: the
+    /// response has status "processing"; poll GET /api/files/{fileId} until "completed" (usable) or "failed".
     /// </summary>
     [HttpPost("upload")]
     [Consumes("multipart/form-data")]
@@ -77,6 +78,16 @@ public sealed class FilesController(IFileService files) : ControllerBase
         Response.Headers.CacheControl = "private, no-store";
         // File() disposes the stream and sets "Content-Disposition: attachment" with an RFC 5987 filename*.
         return File(download.Content, download.ContentType, download.FileName);
+    }
+
+    /// <summary>One extracted passage (what an AI citation [file:chunkId] points at). Owner only, else 404.</summary>
+    [HttpGet("{fileId:guid}/chunks/{chunkId:long}")]
+    [ProducesResponseType(typeof(ChunkDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ChunkDto>> Chunk(Guid fileId, long chunkId, CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "private, no-store";
+        return Ok(await files.GetChunkAsync(User.GetUserId(), fileId, chunkId, cancellationToken));
     }
 
     /// <summary>Deletes the file, its extracted text and its links to chat messages.</summary>

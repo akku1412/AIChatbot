@@ -8,6 +8,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Repositories;
 using ChatGPTClone.Api.Services;
 using ChatGPTClone.Api.Services.Ai;
+using ChatGPTClone.Api.Services.Embeddings;
 using ChatGPTClone.Api.Services.Export;
 using ChatGPTClone.Api.Services.Files;
 using ChatGPTClone.Api.Validators;
@@ -57,6 +58,14 @@ builder.Services.AddOptions<JwtOptions>()
 builder.Services.AddOptions<FileUploadOptions>()
     .Bind(builder.Configuration.GetSection(FileUploadOptions.SectionName))
     .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<OcrOptions>()
+    .Bind(builder.Configuration.GetSection(OcrOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<EmbeddingOptions>()
+    .Bind(builder.Configuration.GetSection(EmbeddingOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(o => o.Provider is "Local" or "OpenAI" or "None", "Embeddings:Provider must be Local, OpenAI or None.")
+    .ValidateOnStart();
 builder.Services.AddOptions<AiOptions>()
     .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
     .ValidateDataAnnotations()
@@ -125,12 +134,28 @@ builder.Services.AddScoped<ChatStreamResponder>();
 builder.Services.AddScoped<IConversationExportService, ConversationExportService>();
 builder.Services.AddScoped<IResponseExportService, ResponseExportService>();
 
-// Documents: private storage, format-specific text extractors, upload/ownership logic, AI context retrieval.
+// Documents: private storage, format-specific text extractors (OCR for scans and images), upload/ownership logic,
+// background processing (extract → chunk → embed) and hybrid AI context retrieval.
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
-builder.Services.AddSingleton<IDocumentExtractor, PdfExtractor>();
+builder.Services.AddSingleton<IOcrEngine, TesseractOcrEngine>();
+builder.Services.AddSingleton<IDocumentExtractor>(sp =>
+    new PdfExtractor(sp.GetRequiredService<IOcrEngine>(), sp.GetRequiredService<IOptions<OcrOptions>>()));
 builder.Services.AddSingleton<IDocumentExtractor, DocxExtractor>();
 builder.Services.AddSingleton<IDocumentExtractor, SpreadsheetExtractor>();
+builder.Services.AddSingleton<IDocumentExtractor, CsvExtractor>();
+builder.Services.AddSingleton<IDocumentExtractor, PptxExtractor>();
+builder.Services.AddSingleton<IDocumentExtractor, ImageExtractor>();
 builder.Services.AddSingleton<IDocumentExtractor, TextFileExtractor>();
+builder.Services.AddSingleton<IEmbeddingProvider>(sp =>
+    sp.GetRequiredService<IOptions<EmbeddingOptions>>().Value.Provider switch
+    {
+        "Local" => ActivatorUtilities.CreateInstance<LocalE5EmbeddingProvider>(sp),
+        "OpenAI" => ActivatorUtilities.CreateInstance<OpenAiEmbeddingProvider>(sp),
+        _ => new NoEmbeddingProvider(),
+    });
+builder.Services.AddSingleton<IDocumentProcessingQueue, DocumentProcessingQueue>();
+builder.Services.AddScoped<IDocumentProcessor, DocumentProcessor>();
+builder.Services.AddHostedService<DocumentProcessingWorker>();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IDocumentContextBuilder, DocumentContextBuilder>();
 builder.Services.AddScoped<UploadSizeLimitFilter>();

@@ -59,7 +59,7 @@ public sealed class TextFileExtractor : IDocumentExtractor
         return new ExtractionResult(sections, PageCount: null, warning);
     }
 
-    private static string Decode(ReadOnlySpan<byte> bytes)
+    internal static string Decode(ReadOnlySpan<byte> bytes)
     {
         if (bytes.StartsWith((byte[])[0xEF, 0xBB, 0xBF]))
         {

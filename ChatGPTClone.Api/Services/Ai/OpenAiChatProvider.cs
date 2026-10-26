@@ -43,22 +43,28 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         }
 
         _client = new ChatClient(settings.Model, new ApiKeyCredential(settings.ApiKey), clientOptions);
+        if (!string.IsNullOrWhiteSpace(settings.VisionModel))
+        {
+            _visionClient = new ChatClient(settings.VisionModel, new ApiKeyCredential(settings.ApiKey), clientOptions);
+        }
     }
+
+    /// <summary>Separate model for prompts with images (the main model may not accept them). Null = images are dropped.</summary>
+    private readonly ChatClient? _visionClient;
 
     public string Name { get; }
 
     public async Task<AiCompletion> CompleteAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
         CancellationToken cancellationToken)
     {
-        var client = RequireClient();
-        var chatMessages = ToChatMessages(messages);
+        var (client, chatMessages, effort) = Prepare(messages);
 
         ChatCompletion completion;
         try
         {
             completion = await client.CompleteChatAsync(
                 chatMessages,
-                new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = _reasoningEffort },
+                new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = effort },
                 cancellationToken);
         }
         catch (ClientResultException ex)
@@ -96,9 +102,9 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     public async IAsyncEnumerable<AiStreamUpdate> StreamAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var client = RequireClient();
-        var options = new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = _reasoningEffort };
-        var updates = client.CompleteChatStreamingAsync(ToChatMessages(messages), options, cancellationToken)
+        var (client, chatMessages, effort) = Prepare(messages);
+        var options = new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = effort };
+        var updates = client.CompleteChatStreamingAsync(chatMessages, options, cancellationToken)
             .GetAsyncEnumerator(cancellationToken);
 
         int? totalTokens = null;
@@ -160,11 +166,35 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     private ChatClient RequireClient() =>
         _client ?? throw new AiProviderException(AiFailureKind.NotConfigured, $"{Name} API key is not configured.");
 
-    private static List<ChatMessage> ToChatMessages(IReadOnlyList<AiChatMessage> messages) =>
+    /// <summary>
+    /// Prompts with images go to the vision model (without reasoning_effort, which vision models may reject).
+    /// Without a vision model the images are left out; the AI still has the text read from them (OCR).
+    /// </summary>
+    private (ChatClient Client, List<ChatMessage> Messages, ChatReasoningEffortLevel? Effort) Prepare(IReadOnlyList<AiChatMessage> messages)
+    {
+        var client = RequireClient();
+        var hasImages = messages.Any(m => m.Images is { Count: > 0 });
+        if (hasImages && _visionClient is not null)
+        {
+            return (_visionClient, ToChatMessages(messages, withImages: true), null);
+        }
+        if (hasImages)
+        {
+            _logger.LogInformation("{Provider} has no vision model configured; sending the prompt without images", Name);
+        }
+        return (client, ToChatMessages(messages, withImages: false), _reasoningEffort);
+    }
+
+    internal static List<ChatMessage> ToChatMessages(IReadOnlyList<AiChatMessage> messages, bool withImages) =>
         messages.Select<AiChatMessage, ChatMessage>(m => m.Role switch
         {
             MessageRole.System => new SystemChatMessage(m.Content),
             MessageRole.Assistant => new AssistantChatMessage(m.Content),
+            _ when withImages && m.Images is { Count: > 0 } images => new UserChatMessage(
+            [
+                ChatMessageContentPart.CreateTextPart(m.Content),
+                .. images.Select(i => ChatMessageContentPart.CreateImagePart(BinaryData.FromBytes(i.Data), i.ContentType)),
+            ]),
             _ => new UserChatMessage(m.Content),
         }).ToList();
 

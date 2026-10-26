@@ -15,17 +15,24 @@ public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSi
 /// <summary>
 /// Role is serialized lower-case ("user" / "assistant") to match the database and the Angular models.
 /// VersionNumber/VersionCount drive the "‹ 2/3 ›" arrows; IsTruncated means the user stopped the reply.
+/// Sources (AI replies) are the passages it was given; its "[file:ChunkId]" markers refer to them.
 /// </summary>
 public sealed record MessageDto(long MessageId, string Role, string Content, DateTime CreatedAt, int? TokenUsage,
-    IReadOnlyList<AttachmentDto> Attachments, long? ParentMessageId, int VersionNumber, int VersionCount, bool IsTruncated)
+    IReadOnlyList<AttachmentDto> Attachments, long? ParentMessageId, int VersionNumber, int VersionCount, bool IsTruncated,
+    IReadOnlyList<SourceDto> Sources)
 {
     public static MessageDto From(Message m, int versionNumber = 1, int versionCount = 1) =>
         new(m.MessageId, m.Role.ToString().ToLowerInvariant(), m.Content, m.CreatedAt, m.TokenUsage,
             m.Attachments
                 .Where(a => a.File is not null)
-                .Select(a => new AttachmentDto(a.FileId, a.File.OriginalFileName, a.File.FileExtension, a.File.FileSize))
+                .Select(a => new AttachmentDto(a.FileId, a.File.OriginalFileName, a.File.FileExtension, a.File.FileSize, a.File.IsImage))
                 .ToList(),
-            m.ParentMessageId, versionNumber, versionCount, m.IsTruncated);
+            m.ParentMessageId, versionNumber, versionCount, m.IsTruncated,
+            m.Sources
+                .Where(s => s.Chunk?.File is not null)
+                .OrderByDescending(s => s.Score)
+                .Select(s => new SourceDto(s.ChunkId, s.Chunk.FileId, s.Chunk.File.OriginalFileName, s.Chunk.Location, s.Chunk.Source == ChunkSource.Ocr))
+                .ToList());
 }
 
 /// <summary>Oldest-first page of messages; HasMore means older messages exist (use "before").</summary>

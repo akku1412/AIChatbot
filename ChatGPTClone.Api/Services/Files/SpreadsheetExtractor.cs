@@ -83,6 +83,29 @@ public sealed class SpreadsheetExtractor : IDocumentExtractor
         List<ExtractedSection> sections, List<string> warnings)
     {
         var sheet = string.IsNullOrWhiteSpace(reader.Name) ? "Sheet" : reader.Name.Trim();
+        ReadRows(sheet, Rows(reader), budget, limits, sections, warnings);
+    }
+
+    private static IEnumerable<object?[]> Rows(IExcelDataReader reader)
+    {
+        while (reader.Read())
+        {
+            var values = new object?[reader.FieldCount];
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                values[i] = reader.GetValue(i);
+            }
+            yield return values;
+        }
+    }
+
+    /// <summary>
+    /// One table (a sheet, or a CSV file): the first non-blank row is the header; rows become text sections of
+    /// 40 rows ("R12: Region=North; Revenue=1200") and a computed summary (totals, averages, min/max, blanks).
+    /// </summary>
+    internal static void ReadRows(string sheet, IEnumerable<object?[]> rows, TextBudget budget, ExtractionLimits limits,
+        List<ExtractedSection> sections, List<string> warnings)
+    {
         string[]? headers = null;
         ColumnStats[] stats = [];
         var excelRow = 0;
@@ -109,14 +132,9 @@ public sealed class SpreadsheetExtractor : IDocumentExtractor
             blockRows = 0;
         }
 
-        while (reader.Read())
+        foreach (var values in rows)
         {
             excelRow++;
-            var values = new object?[reader.FieldCount];
-            for (var i = 0; i < reader.FieldCount; i++)
-            {
-                values[i] = reader.GetValue(i);
-            }
             if (values.All(IsBlank))
             {
                 continue;

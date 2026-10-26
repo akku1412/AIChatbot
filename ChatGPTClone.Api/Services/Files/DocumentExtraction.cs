@@ -3,11 +3,23 @@ using ChatGPTClone.Api.Models;
 namespace ChatGPTClone.Api.Services.Files;
 
 /// <summary>A piece of extracted content and where it came from.</summary>
-public sealed record ExtractedSection(string Location, string Text, DocumentChunkKind Kind = DocumentChunkKind.Text);
+public sealed record ExtractedSection(string Location, string Text, DocumentChunkKind Kind = DocumentChunkKind.Text,
+    ChunkSource Source = ChunkSource.Text);
 
 public sealed record ExtractionResult(IReadOnlyList<ExtractedSection> Sections, int? PageCount, string? Warning);
 
-public sealed record ExtractionLimits(int MaxCharacters, int MaxRowsPerSheet);
+/// <param name="ReportProgress">Called with (done, total) during slow steps such as OCR of scanned pages.</param>
+public sealed record ExtractionLimits(int MaxCharacters, int MaxRowsPerSheet, Action<int, int>? ReportProgress = null);
+
+/// <summary>Text recognition (OCR) for scanned pages and pictures.</summary>
+public interface IOcrEngine
+{
+    /// <summary>False when OCR isn't set up (no language data); scanned documents are then rejected as before.</summary>
+    bool IsAvailable { get; }
+
+    /// <summary>The text in an image (PNG/JPEG/WebP bytes), lines separated by "\n"; empty when none is found.</summary>
+    string Recognize(byte[] image);
+}
 
 /// <summary>The document can't be used: corrupted, password-protected, scanned without text, empty...</summary>
 public sealed class DocumentExtractionException(string userMessage, string reason, Exception? inner = null)

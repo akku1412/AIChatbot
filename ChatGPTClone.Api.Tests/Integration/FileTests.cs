@@ -88,16 +88,31 @@ public class FileTests(ApiFactory factory)
         var big = await UploadAsync(client, token, "big.pdf", new byte[ApiFactory.MaxFileSize + 1]);
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, big.StatusCode);
 
+        // Reading happens in the background (Phase 2), so a file with no readable text is accepted and then marked
+        // "failed" with a reason the file card shows. A scanned page that OCR can't read either (blank image) fails too.
         var scanned = await UploadAsync(client, token, "scan.pdf", TestDocuments.ImageOnlyPdf());
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, scanned.StatusCode);
-        Assert.Equal("ocr_required", (await scanned.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("reason").GetString());
+        Assert.Equal(HttpStatusCode.Created, scanned.StatusCode);
+        var scannedFile = await scanned.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal("failed", scannedFile.GetProperty("status").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(scannedFile.GetProperty("statusMessage").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(scannedFile.GetProperty("statusReason").GetString()));
 
         var blankDoc = await UploadAsync(client, token, "blank.docx", TestDocuments.EmptyDocx());
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, blankDoc.StatusCode);
+        var blankFile = await blankDoc.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal("failed", blankFile.GetProperty("status").GetString());
 
-        Assert.Equal(before, StoredFileCount());
+        Assert.Equal(before, StoredFileCount()); // the bytes of failed files are deleted
         var userFiles = await (await client.SendAsync(Authorized(HttpMethod.Get, "/api/files", token))).Content.ReadFromJsonAsync<JsonElement>(Json);
-        Assert.Equal(0, userFiles.GetArrayLength()); // failed uploads leave no records
+        Assert.All(userFiles.EnumerateArray(), f => Assert.Equal("failed", f.GetProperty("status").GetString()));
+
+        // A failed file can't be attached, downloaded, or used.
+        var conversationId = await NewConversationAsync(client, token);
+        var send = await client.SendAsync(Authorized(HttpMethod.Post, $"/api/chat/{conversationId}/messages", token,
+            new { content = "What is in it?", attachmentIds = new[] { scannedFile.GetProperty("fileId").GetGuid() } }));
+        Assert.Equal(HttpStatusCode.Conflict, send.StatusCode);
+        Assert.Equal("file_failed", (await send.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("reason").GetString());
+        var download = await client.SendAsync(Authorized(HttpMethod.Get, $"/api/files/{scannedFile.GetProperty("fileId").GetGuid()}/download", token));
+        Assert.Equal(HttpStatusCode.NotFound, download.StatusCode);
     }
 
     [Fact]
@@ -156,7 +171,11 @@ public class FileTests(ApiFactory factory)
         Assert.Contains("untrusted DATA", system.Content);
         Assert.Contains("<document name=\"sales.xlsx\"", system.Content);
         Assert.Contains("Column C 'Revenue': 3 values, 1 blank; numeric 3: sum=4000", system.Content);
-        Assert.Contains("[Page 1]", system.Content);
+        // Each passage carries the id the AI cites ([file:N]) and its location.
+        var pageOneId = await factory.WithDbAsync(db => db.DocumentChunks.Where(c => c.FileId == pdf && c.Location == "Page 1")
+            .Select(c => c.ChunkId).SingleAsync());
+        Assert.Contains($"<passage id=\"file:{pageOneId}\" location=\"Page 1\">", system.Content);
+        Assert.Contains("[file:123]", system.Content); // the citation instruction
         Assert.Contains("2026-12-15", system.Content);
         // The document cannot close our delimiter early.
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(system.Content, "</document>").Count);

@@ -14,6 +14,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
     public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
+    public DbSet<ChunkEmbedding> ChunkEmbeddings => Set<ChunkEmbedding>();
+    public DbSet<MessageSource> MessageSources => Set<MessageSource>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

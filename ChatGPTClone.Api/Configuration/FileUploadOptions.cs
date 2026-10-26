@@ -14,8 +14,16 @@ public sealed class FileUploadOptions
     [Range(1024, 200L * 1024 * 1024)]
     public long MaxFileSizeBytes { get; init; } = 20L * 1024 * 1024;
 
+    /// <summary>Images (PNG/JPEG/WebP) have their own, smaller limit.</summary>
+    [Range(1024, 50L * 1024 * 1024)]
+    public long MaxImageSizeBytes { get; init; } = 10L * 1024 * 1024;
+
     [Range(1, 20)]
     public int MaxFilesPerMessage { get; init; } = 5;
+
+    /// <summary>Background processing (text extraction, OCR, indexing) of one file stops after this long.</summary>
+    [Range(10, 3600)]
+    public int ProcessingTimeoutSeconds { get; init; } = 300;
 
     /// <summary>Stop extracting after this many characters per file (protects memory, the database and the AI context).</summary>
     [Range(1000, 10_000_000)]

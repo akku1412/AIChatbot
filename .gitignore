@@ -22,3 +22,6 @@ publish/
 
 # Uploaded user files (private, never committed)
 ChatGPTClone.Api/App_Data/
+
+# Embedding model (~118 MB, downloaded by scripts/download-models.ps1; too large for git)
+ChatGPTClone.Api/AiModels/

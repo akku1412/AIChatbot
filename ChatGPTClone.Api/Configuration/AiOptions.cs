@@ -68,4 +68,10 @@ public sealed class OpenAiProviderOptions
     /// their whole token budget on hidden reasoning and come back empty. Leave empty for other models.
     /// </summary>
     public string? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// A model that accepts images, used automatically when a message has images attached
+    /// (e.g. "qwen/qwen3.8-27b" on Groq, "gpt-4.1-mini" on OpenAI). Empty = images can't be analysed.
+    /// </summary>
+    public string? VisionModel { get; set; }
 }

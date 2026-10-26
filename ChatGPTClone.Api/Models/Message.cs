@@ -43,4 +43,7 @@ public class Message : IHasCreatedAt
     public Conversation Conversation { get; set; } = null!;
 
     public ICollection<MessageAttachment> Attachments { get; set; } = new List<MessageAttachment>();
+
+    /// <summary>AI replies: the document chunks it was given, which its [file:chunkId] citations refer to.</summary>
+    public ICollection<MessageSource> Sources { get; set; } = new List<MessageSource>();
 }

@@ -1,10 +1,25 @@
 import { HttpClient, HttpEvent, HttpResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, exhaustMap, retry, takeWhile, timer } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { readBlobErrors } from '../http/api-error';
 import { DEFAULT_UPLOAD_LIMITS, UploadLimits, UploadedFile } from '../models/chat.models';
+
+/** True while the server is still reading the file. */
+export function isProcessing(file: UploadedFile): boolean {
+  return file.status === 'uploaded' || file.status === 'processing';
+}
+
+/** "Reading scanned pages… 3/12", "Indexing for search…", or null when the server gave no step. */
+export function processingLabel(file: UploadedFile): string | null {
+  if (!file.statusMessage) {
+    return null;
+  }
+  return file.progressTotal
+    ? `${file.statusMessage}… ${file.progressCurrent ?? 0}/${file.progressTotal}`
+    : `${file.statusMessage}…`;
+}
 
 /** Typed calls for /api/files. Uploads report progress; unsubscribing cancels the request. */
 @Injectable({ providedIn: 'root' })
@@ -36,6 +51,19 @@ export class FileApiService {
 
   get(fileId: string): Observable<UploadedFile> {
     return this.http.get<UploadedFile>(`${this.url}/${fileId}`);
+  }
+
+  /**
+   * The server reads files in the background (OCR can take a while), so an upload may answer "processing".
+   * Polls GET /api/files/{id}, emitting each update, and completes with the "completed" or "failed" file.
+   * Brief network errors are retried; unsubscribing stops polling.
+   */
+  watch(fileId: string, intervalMs = 1000): Observable<UploadedFile> {
+    return timer(intervalMs, intervalMs).pipe(
+      exhaustMap(() => this.get(fileId)),
+      retry({ count: 3, delay: intervalMs }),
+      takeWhile((file) => isProcessing(file), true),
+    );
   }
 
   /** The original uploaded file (owner only); the server names it in Content-Disposition. */
