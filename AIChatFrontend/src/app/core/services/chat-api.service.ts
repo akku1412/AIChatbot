@@ -13,6 +13,9 @@ import {
   MessagePage,
   PagedResult,
   SendMessageResponse,
+  ShareCreated,
+  ShareStatus,
+  SharedConversation,
 } from '../models/chat.models';
 import { ChatStreamService } from './chat-stream.service';
 
@@ -53,6 +56,25 @@ export class ChatApiService {
       modelId: modelId ?? null,
       projectId: projectId ?? null,
     });
+  }
+
+  /** Creates a read-only link to a snapshot of the chat (replacing any earlier link). The token is shown only now. */
+  shareConversation(conversationId: number): Observable<ShareCreated> {
+    return this.http.post<ShareCreated>(`${this.conversationsUrl}/${conversationId}/share`, null);
+  }
+
+  getShareStatus(conversationId: number): Observable<ShareStatus> {
+    return this.http.get<ShareStatus>(`${this.conversationsUrl}/${conversationId}/share`);
+  }
+
+  /** Stops sharing: the link stops working at once. */
+  revokeShare(conversationId: number): Observable<void> {
+    return this.http.delete<void>(`${this.conversationsUrl}/${conversationId}/share`);
+  }
+
+  /** The public snapshot behind a share link (no sign-in needed). */
+  getSharedConversation(token: string): Observable<SharedConversation> {
+    return this.http.get<SharedConversation>(`${environment.apiBaseUrl}/share/${encodeURIComponent(token)}`);
   }
 
   /** Moves a chat into a project, or back to the main list with null. */

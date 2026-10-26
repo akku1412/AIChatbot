@@ -26,4 +26,8 @@ public sealed class RateLimitOptions
     /// <summary>Reply exports (PDF, DOCX, XLSX, TXT), per signed-in user.</summary>
     [Range(1, 100_000)]
     public int ExportsPerMinute { get; init; } = 30;
+
+    /// <summary>Public shared-chat pages (no sign-in), per client IP: slows down token guessing and scraping.</summary>
+    [Range(1, 100_000)]
+    public int SharedLinksPerMinute { get; init; } = 30;
 }

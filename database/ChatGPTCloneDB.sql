@@ -798,3 +798,57 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026053811_Phase3SharedLinks'
+)
+BEGIN
+    CREATE TABLE [SharedLinks] (
+        [SharedLinkId] int NOT NULL IDENTITY,
+        [ConversationId] int NOT NULL,
+        [TokenHash] binary(32) NOT NULL,
+        [Title] nvarchar(200) NOT NULL,
+        [SnapshotJson] nvarchar(max) NOT NULL,
+        [MessageCount] int NOT NULL,
+        [CreatedAt] datetime2(3) NOT NULL,
+        [RevokedAt] datetime2(3) NULL,
+        CONSTRAINT [PK_SharedLinks] PRIMARY KEY ([SharedLinkId]),
+        CONSTRAINT [FK_SharedLinks_Conversations_ConversationId] FOREIGN KEY ([ConversationId]) REFERENCES [Conversations] ([ConversationId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026053811_Phase3SharedLinks'
+)
+BEGIN
+    CREATE INDEX [IX_SharedLinks_ConversationId_RevokedAt] ON [SharedLinks] ([ConversationId], [RevokedAt]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026053811_Phase3SharedLinks'
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_SharedLinks_TokenHash] ON [SharedLinks] ([TokenHash]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026053811_Phase3SharedLinks'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261026053811_Phase3SharedLinks', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+

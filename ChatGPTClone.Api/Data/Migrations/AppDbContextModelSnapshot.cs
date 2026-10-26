@@ -408,6 +408,51 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.ToTable("RefreshTokens", (string)null);
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.SharedLink", b =>
+                {
+                    b.Property<int>("SharedLinkId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SharedLinkId"));
+
+                    b.Property<int>("ConversationId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.HasKey("SharedLinkId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SharedLinks_TokenHash");
+
+                    b.HasIndex("ConversationId", "RevokedAt")
+                        .HasDatabaseName("IX_SharedLinks_ConversationId_RevokedAt");
+
+                    b.ToTable("SharedLinks", (string)null);
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>
                 {
                     b.Property<Guid>("FileId")
@@ -702,6 +747,17 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.SharedLink", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.Conversation", "Conversation")
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Conversation");
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>

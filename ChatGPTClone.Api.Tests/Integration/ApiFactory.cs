@@ -67,6 +67,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("RateLimits:AuthPerMinute", "100000");
         builder.UseSetting("RateLimits:AiChatPerMinute", "100000");
         builder.UseSetting("RateLimits:UploadsPerMinute", "100000");
+        builder.UseSetting("RateLimits:SharedLinksPerMinute", "100000");
         builder.UseSetting("FileUploads:StoragePath", StoragePath);
         builder.UseSetting("FileUploads:MaxFileSizeBytes", MaxFileSize.ToString());
         builder.UseSetting("FileUploads:MaxImageSizeBytes", MaxImageSize.ToString());

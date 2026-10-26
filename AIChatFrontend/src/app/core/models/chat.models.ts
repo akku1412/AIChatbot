@@ -36,6 +36,36 @@ export interface ProjectDetail {
   updatedAt: string;
 }
 
+/** POST /api/conversations/{id}/share: the link is {origin}/share/{token}; the token can't be fetched again later. */
+export interface ShareCreated {
+  token: string;
+  sharedAt: string;
+  messageCount: number;
+}
+
+/** GET /api/conversations/{id}/share */
+export interface ShareStatus {
+  isShared: boolean;
+  sharedAt: string | null;
+  messageCount: number | null;
+}
+
+/** GET /api/share/{token} (public): a read-only snapshot, without ids of any kind. */
+export interface SharedConversation {
+  title: string;
+  sharedAt: string;
+  messages: SharedMessage[];
+}
+
+export interface SharedMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  /** File names only: shared pages never offer downloads. */
+  attachments: string[];
+  isTruncated: boolean;
+}
+
 /** Same limits as the API (Project.NameMaxLength / InstructionsMaxLength / MaxFiles). */
 export const PROJECT_NAME_MAX = 100;
 export const PROJECT_INSTRUCTIONS_MAX = 4000;

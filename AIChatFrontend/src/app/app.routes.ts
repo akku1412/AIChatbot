@@ -20,6 +20,12 @@ export const routes: Routes = [
       import('./features/otp-verification/otp-verification').then((m) => m.OtpVerification),
   },
   {
+    // Public, read-only shared chat: no sign-in (and no guard, so signed-in users can open links too).
+    path: 'share/:token',
+    title: 'Shared chat · AIChat',
+    loadComponent: () => import('./features/share/shared-chat').then((m) => m.SharedChat),
+  },
+  {
     // Signed-in area: sidebar + header layout around chat and profile pages.
     path: '',
     canActivate: [authGuard],

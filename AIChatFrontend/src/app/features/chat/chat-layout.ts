@@ -14,13 +14,14 @@ import { AppHeader } from '../../shared/components/app-header/app-header';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
 import { ModelPicker } from '../../shared/components/model-picker/model-picker';
 import { ProjectsSection } from '../../shared/components/projects-section/projects-section';
+import { ShareDialog } from '../../shared/components/share-dialog/share-dialog';
 import { ArchiveRequest, MoveRequest, PinRequest, RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 
 /** Signed-in shell: sidebar (a drawer on small screens) + header + the routed page (chat or profile). */
 @Component({
   selector: 'app-chat-layout',
-  imports: [RouterOutlet, Sidebar, AppHeader, ModelPicker, ProjectsSection],
+  imports: [RouterOutlet, Sidebar, AppHeader, ModelPicker, ProjectsSection, ShareDialog],
   host: { '(document:keydown.escape)': 'closeDrawer()' },
   template: `
     <div class="layout" [class.drawer-open]="drawerOpen()">
@@ -69,12 +70,16 @@ import { NotificationService } from '../../shared/components/toast/notification.
           (menu)="drawerOpen.set(true)"
           (newChat)="newChat()"
           (export)="exportChat(store.activeConversationId()!)"
+          (share)="shareOpenFor.set(store.activeConversationId())"
         >
           @if (onChat()) {
             <app-model-picker header-start />
           }
         </app-header>
         <router-outlet />
+        @if (shareOpenFor(); as conversationId) {
+          <app-share-dialog [conversationId]="conversationId" (closed)="shareOpenFor.set(null)" />
+        }
       </section>
     </div>
   `,
@@ -119,6 +124,8 @@ export class ChatLayout {
       !this.store.sending(),
   );
   protected readonly exporting = signal(false);
+  /** The chat whose "Share" dialog is open. */
+  protected readonly shareOpenFor = signal<number | null>(null);
 
   constructor() {
     this.store.loadConversations();

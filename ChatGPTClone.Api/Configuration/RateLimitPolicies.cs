@@ -13,4 +13,7 @@ public static class RateLimitPolicies
 
     /// <summary>Per-user limit on generating PDF/DOCX/XLSX/TXT exports (CPU work on the server).</summary>
     public const string Exports = "exports";
+
+    /// <summary>Per-IP limit on the public, anonymous shared-chat endpoint.</summary>
+    public const string SharedLinks = "shared-links";
 }

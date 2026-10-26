@@ -118,6 +118,7 @@ builder.Services.AddSingleton<ITokenService, TokenService>();
 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<ISharingService, SharingService>();
 
 builder.Services.AddSingleton<IGoogleTokenValidator, GoogleTokenValidator>();
 builder.Services.AddSingleton<IOtpChallengeProtector, OtpChallengeProtector>();
@@ -217,6 +218,10 @@ builder.Services.AddRateLimiter(o =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => PerMinute(limits.ExportsPerMinute)));
+    // Anonymous: per IP.
+    o.AddPolicy(RateLimitPolicies.SharedLinks, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => PerMinute(limits.SharedLinksPerMinute)));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
             ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => PerMinute(limits.GlobalPerMinute)));

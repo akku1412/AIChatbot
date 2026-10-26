@@ -14,6 +14,9 @@ import { Component, input, output } from '@angular/core';
       <ng-content select="[header-start]" />
       <h1 class="title" [title]="title()">{{ title() }}</h1>
       @if (canExport()) {
+        <button type="button" class="icon-button share" aria-label="Share chat" title="Share chat" (click)="share.emit()">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <button type="button" class="icon-button export" [disabled]="exporting()" aria-label="Export chat as TXT"
                 title="Export chat as TXT" (click)="export.emit()">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -39,8 +42,8 @@ import { Component, input, output } from '@angular/core';
     }
     .icon-button:hover { background: var(--surface-hover); }
     .icon-button:disabled { opacity: 0.5; cursor: progress; }
-    .export { color: var(--text-muted); }
-    .export:hover { color: var(--text); }
+    .export, .share { color: var(--text-muted); }
+    .export:hover, .share:hover { color: var(--text); }
     .mobile { visibility: hidden; }
     @media (max-width: 768px) { .mobile { visibility: visible; } }
     /* Desktop: the hidden new-chat button would leave a gap after the export button. */
@@ -55,4 +58,5 @@ export class AppHeader {
   readonly menu = output<void>();
   readonly newChat = output<void>();
   readonly export = output<void>();
+  readonly share = output<void>();
 }

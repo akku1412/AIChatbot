@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
+    public DbSet<SharedLink> SharedLinks => Set<SharedLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
