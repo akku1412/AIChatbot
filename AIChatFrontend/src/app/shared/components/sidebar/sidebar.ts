@@ -2,7 +2,13 @@ import { Component, DestroyRef, ElementRef, computed, inject, input, output, sig
 import { RouterLink, RouterLinkActive } from '@angular/router';
 
 import { User } from '../../../core/auth/auth.models';
-import { ConversationSearchResult, ConversationSummary, Project } from '../../../core/models/chat.models';
+import {
+  CHAT_EXPORT_LABELS,
+  ChatExportFormat,
+  ConversationSearchResult,
+  ConversationSummary,
+  Project,
+} from '../../../core/models/chat.models';
 import { AppLogo } from '../app-logo/app-logo';
 import { LoadingSpinner } from '../loading-spinner/loading-spinner';
 
@@ -29,6 +35,11 @@ export interface ArchiveRequest {
 export interface MoveRequest {
   conversation: ConversationSummary;
   projectId: number;
+}
+
+export interface ExportRequest {
+  conversation: ConversationSummary;
+  format: ChatExportFormat;
 }
 
 /** A piece of text, marked when it matches the search. */
@@ -216,10 +227,12 @@ export function highlightMatches(text: string, query: string): TextPart[] {
                         </button>
                       }
                     }
-                    <button type="button" role="menuitem" (click)="requestExport(conversation)">
-                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                      Export as TXT
-                    </button>
+                    @for (format of exportFormats; track format) {
+                      <button type="button" role="menuitem" (click)="requestExport(conversation, format)">
+                        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Export as {{ exportLabels[format] }}
+                      </button>
+                    }
                     <button type="button" role="menuitem" (click)="requestArchive(conversation)">
                       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16v13H4zM3 4h18v3H3zM10 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       Archive
@@ -319,11 +332,13 @@ export class Sidebar {
   readonly closed = output<void>();
   readonly rename = output<RenameRequest>();
   readonly remove = output<ConversationSummary>();
-  readonly exportChat = output<ConversationSummary>();
+  readonly exportChat = output<ExportRequest>();
   readonly move = output<MoveRequest>();
   readonly toggleTheme = output<void>();
 
   protected readonly titleMax = TITLE_MAX;
+  protected readonly exportFormats: ChatExportFormat[] = ['txt', 'pdf', 'docx'];
+  protected readonly exportLabels = CHAT_EXPORT_LABELS;
   protected readonly imageFailed = signal(false);
   protected readonly openMenuId = signal<number | null>(null);
   protected readonly editingId = signal<number | null>(null);
@@ -455,9 +470,9 @@ export class Sidebar {
     this.move.emit({ conversation, projectId });
   }
 
-  protected requestExport(conversation: ConversationSummary): void {
+  protected requestExport(conversation: ConversationSummary, format: ChatExportFormat): void {
     this.closeMenu();
-    this.exportChat.emit(conversation);
+    this.exportChat.emit({ conversation, format });
   }
 
   protected requestDelete(conversation: ConversationSummary): void {

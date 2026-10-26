@@ -5,7 +5,7 @@ import { filter, finalize, map } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http/api-error';
-import { ConversationSummary } from '../../core/models/chat.models';
+import { CHAT_EXPORT_LABELS, ChatExportFormat, ConversationSummary } from '../../core/models/chat.models';
 import { ChatApiService } from '../../core/services/chat-api.service';
 import { ChatStore } from '../../core/services/chat.store';
 import { ProjectService } from '../../core/services/project.service';
@@ -54,7 +54,7 @@ import { NotificationService } from '../../shared/components/toast/notification.
           (retry)="store.loadConversations()"
           (rename)="rename($event)"
           (remove)="remove($event)"
-          (exportChat)="exportChat($event.conversationId)"
+          (exportChat)="exportChat($event.conversation.conversationId, $event.format)"
           (logout)="logout()"
         >
           <app-projects-section sidebar-projects (selected)="closeDrawer()" />
@@ -72,7 +72,7 @@ import { NotificationService } from '../../shared/components/toast/notification.
           [exporting]="exporting()"
           (menu)="drawerOpen.set(true)"
           (newChat)="newChat()"
-          (export)="exportChat(store.activeConversationId()!)"
+          (export)="exportChat(store.activeConversationId()!, $event)"
           (share)="shareOpenFor.set(store.activeConversationId())"
         >
           @if (onChat()) {
@@ -137,20 +137,20 @@ export class ChatLayout {
   }
 
   /** Downloads the whole conversation (all messages, not just the loaded page) as a .txt file from the API. */
-  protected exportChat(conversationId: number): void {
+  protected exportChat(conversationId: number, format: ChatExportFormat = 'txt'): void {
     if (this.exporting()) {
       return;
     }
     this.exporting.set(true);
     this.chatApi
-      .exportConversation(conversationId)
+      .exportConversation(conversationId, format)
       .pipe(finalize(() => this.exporting.set(false)))
       .subscribe({
         next: (response) => {
           const title = this.store.conversations().find((c) => c.conversationId === conversationId)?.title ?? 'Chat';
-          const fallback = `AIChat - ${safeFileName(title)}.txt`;
+          const fallback = `AIChat - ${safeFileName(title)}.${format}`;
           saveBlob(response.body!, fileNameFromDisposition(response.headers.get('Content-Disposition'), fallback));
-          this.notifications.success('Chat exported as TXT.');
+          this.notifications.success(`Chat exported as ${CHAT_EXPORT_LABELS[format]}.`);
         },
         error: (err: unknown) => this.notifications.error(`Couldn't export the chat: ${errorMessage(err)}`),
       });

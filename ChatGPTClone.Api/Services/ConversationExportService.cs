@@ -14,24 +14,115 @@ public interface IConversationExportService
 {
     /// <summary>The whole conversation as readable UTF-8 text. 404 when it isn't the user's.</summary>
     Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The whole conversation (oldest first, "You"/"AIChat" headings) as TXT, PDF or DOCX. 404 when it isn't the
+    /// user's; XLSX is for single replies with tables, so it isn't offered for whole chats.
+    /// </summary>
+    Task<ExportedFile> ExportAsync(int userId, int conversationId, ExportFormat format, CancellationToken cancellationToken);
 }
 
 public sealed partial class ConversationExportService(
     IConversationService conversations,
     IMessageRepository messages,
-    TimeProvider clock) : IConversationExportService
+    TimeProvider clock,
+    ILogger<ConversationExportService> logger) : IConversationExportService
 {
     private const string Rule = "------------------------------------------------------------";
 
-    public async Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken)
+    public async Task<ExportedFile> ExportAsync(int userId, int conversationId, ExportFormat format, CancellationToken cancellationToken)
+    {
+        if (format == ExportFormat.Txt)
+        {
+            return await ExportAsTextAsync(userId, conversationId, cancellationToken);
+        }
+        if (format is not (ExportFormat.Pdf or ExportFormat.Docx))
+        {
+            throw new Middleware.ApiException(StatusCodes.Status400BadRequest, "Unsupported format",
+                "Whole chats can be exported as txt, pdf or docx.", new Dictionary<string, object?> { ["reason"] = "unsupported_format" });
+        }
+
+        var (conversation, shown) = await LoadThreadAsync(userId, conversationId, cancellationToken);
+        var exportedAt = clock.GetUtcNow().UtcDateTime;
+        var blocks = ConversationBlocks(shown);
+        byte[] content;
+        try
+        {
+            var context = new ExportContext(conversation.Title, exportedAt);
+            content = format == ExportFormat.Pdf ? PdfRenderer.Render(blocks, context) : DocxRenderer.Render(blocks, context);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Generating a {Format} export of conversation {ConversationId} failed", format, conversationId);
+            throw new Middleware.ApiException(StatusCodes.Status500InternalServerError, "Export failed",
+                "We couldn't create this file. Please try again or choose another format.",
+                new Dictionary<string, object?> { ["reason"] = "export_failed" });
+        }
+
+        var fileName = $"AIChat - {SafeFileName(conversation.Title)} - {exportedAt:yyyy-MM-dd}{format.Extension()}";
+        return new ExportedFile(fileName, format.ContentType(), content);
+    }
+
+    /// <summary>
+    /// The chat as one document for the PDF/DOCX renderers: per message a "You"/"AIChat" heading with its time, attached
+    /// file names, then the text (AI replies as Markdown with readable citations; user text as typed), separated by rules.
+    /// </summary>
+    internal static List<DocBlock> ConversationBlocks(IReadOnlyList<Message> shown)
+    {
+        var blocks = new List<DocBlock>();
+        foreach (var message in shown)
+        {
+            if (blocks.Count > 0)
+            {
+                blocks.Add(new RuleBlock());
+            }
+            var who = message.Role == MessageRole.User ? "You" : "AIChat";
+            blocks.Add(new HeadingBlock(2, [new TextRun(who), new TextRun($" · {Format(message.CreatedAt)}", Italic: true)]));
+
+            var attached = message.Attachments.Where(a => a.File is not null).Select(a => a.File.OriginalFileName).ToList();
+            if (attached.Count > 0)
+            {
+                blocks.Add(new ParagraphBlock([new TextRun($"Attached: {string.Join(", ", attached)}", Italic: true)]));
+            }
+
+            if (message.Role == MessageRole.Assistant)
+            {
+                blocks.AddRange(MarkdownReader.Parse(Files.Citations.Readable(message)));
+                if (message.IsTruncated)
+                {
+                    blocks.Add(new ParagraphBlock([new TextRun("(stopped)", Italic: true)]));
+                }
+            }
+            else
+            {
+                // The user's text exactly as typed (no Markdown), one paragraph per line.
+                blocks.AddRange(NormalizeLineBreaks(message.Content).Split("\r\n")
+                    .Where(line => line.Trim().Length > 0)
+                    .Select(line => new ParagraphBlock([new TextRun(line)])));
+            }
+        }
+        if (blocks.Count == 0)
+        {
+            blocks.Add(new ParagraphBlock([new TextRun("This conversation has no messages yet.", Italic: true)]));
+        }
+        return blocks;
+    }
+
+    /// <summary>The thread as the user sees it (active versions only), user and AI messages, oldest first. 404 if not theirs.</summary>
+    private async Task<(Conversation Conversation, List<Message> Shown)> LoadThreadAsync(int userId, int conversationId,
+        CancellationToken cancellationToken)
     {
         // Ownership first: someone else's id is a 404, exactly like the other conversation endpoints.
         var conversation = await conversations.GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
-        // The thread as the user sees it: the active version of every message (not superseded versions).
         var nodes = await messages.GetNodesAsync(conversationId, cancellationToken);
         var thread = ConversationTree.ActiveThread(nodes).Select(t => t.Node.MessageId).ToList();
         var all = await messages.GetByIdsAsync(thread, cancellationToken);
-        var shown = all.Where(m => m.Role is MessageRole.User or MessageRole.Assistant).ToList();
+        return (conversation, all.Where(m => m.Role is MessageRole.User or MessageRole.Assistant).ToList());
+    }
+
+    public async Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken)
+    {
+        var (conversation, shown) = await LoadThreadAsync(userId, conversationId, cancellationToken);
         var exportedAt = clock.GetUtcNow().UtcDateTime;
 
         // CRLF so the file reads correctly in every editor, including old Notepad.

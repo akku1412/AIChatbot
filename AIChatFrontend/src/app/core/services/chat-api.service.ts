@@ -9,6 +9,7 @@ import {
   ConversationPatch,
   ConversationSearchResult,
   ConversationSummary,
+  ChatExportFormat,
   ExportFormat,
   FeedbackRating,
   MessagePage,
@@ -109,9 +110,9 @@ export class ChatApiService {
   }
 
   /** The whole conversation as a .txt file (the server names it in Content-Disposition). */
-  exportConversation(conversationId: number): Observable<HttpResponse<Blob>> {
+  exportConversation(conversationId: number, format: ChatExportFormat = 'txt'): Observable<HttpResponse<Blob>> {
     return this.http
-      .get(`${this.conversationsUrl}/${conversationId}/export`, { observe: 'response', responseType: 'blob' })
+      .get(`${this.conversationsUrl}/${conversationId}/export`, { params: { format }, observe: 'response', responseType: 'blob' })
       .pipe(readBlobErrors());
   }
 

@@ -92,7 +92,7 @@ describe('Sidebar', () => {
     (rows[1].querySelector('.more-button') as HTMLButtonElement).click();
     fixture.detectChanges();
     const items = Array.from(el.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent?.trim());
-    expect(items).toEqual(['Pin', 'Rename', 'Export as TXT', 'Archive', 'Delete']);
+    expect(items).toEqual(['Pin', 'Rename', 'Export as TXT', 'Export as PDF', 'Export as Word (DOCX)', 'Archive', 'Delete']);
     (el.querySelectorAll('[role="menuitem"]')[0] as HTMLButtonElement).click();
     expect(pins).toEqual([true]);
 

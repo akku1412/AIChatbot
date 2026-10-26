@@ -1,8 +1,11 @@
 using ChatGPTClone.Api.Authentication;
+using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.DTOs.Chat;
 using ChatGPTClone.Api.Services;
+using ChatGPTClone.Api.Services.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace ChatGPTClone.Api.Controllers;
 
@@ -74,14 +77,25 @@ public sealed class ConversationsController(IConversationService conversations, 
         CancellationToken cancellationToken) =>
         Ok(await conversations.RenameAsync(User.GetUserId(), id, request.Title, cancellationToken));
 
-    /// <summary>The whole conversation (every message, oldest first) as a UTF-8 .txt download.</summary>
+    /// <summary>
+    /// The whole conversation (the visible thread, oldest first, "You"/"AIChat" headings) as a download:
+    /// ?format=txt (default), pdf or docx.
+    /// </summary>
     [HttpGet("{id:int}/export")]
-    [Produces("text/plain", "application/json")]
-    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK, "text/plain")]
+    [EnableRateLimiting(RateLimitPolicies.Exports)]
+    [Produces("text/plain", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/json")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Export(int id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Export(int id, [FromQuery] string? format, CancellationToken cancellationToken)
     {
-        var file = await exports.ExportAsTextAsync(User.GetUserId(), id, cancellationToken);
+        if (!ExportFormats.TryParse(format ?? "txt", out var parsed))
+        {
+            return Problem(statusCode: StatusCodes.Status400BadRequest, title: "Unsupported format",
+                detail: "Whole chats can be exported as txt, pdf or docx.");
+        }
+        var file = await exports.ExportAsync(User.GetUserId(), id, parsed, cancellationToken);
+        Response.Headers.CacheControl = "private, no-store";
         // File() sets "Content-Disposition: attachment" with an RFC 5987 filename*, so non-English titles survive.
         return File(file.Content, file.ContentType, file.FileName);
     }

@@ -179,6 +179,11 @@ export interface ChunkPreview {
 /** GET /api/messages/{id}/export?format=… */
 export type ExportFormat = 'txt' | 'pdf' | 'docx' | 'xlsx';
 
+/** GET /api/conversations/{id}/export?format=… (whole chats: no XLSX). */
+export type ChatExportFormat = 'txt' | 'pdf' | 'docx';
+
+export const CHAT_EXPORT_LABELS: Record<ChatExportFormat, string> = { txt: 'TXT', pdf: 'PDF', docx: 'Word (DOCX)' };
+
 export type FileStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
 
 /** POST /api/files/upload and GET /api/files/{id}. */
