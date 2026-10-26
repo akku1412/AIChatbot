@@ -103,6 +103,63 @@ public sealed class ConversationExportTests(ApiFactory factory) : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await GetAsync(user, $"/api/conversations/{chat}/export?format=html")).StatusCode);
     }
 
+    // ---------- Feature 23: times in the reader's time zone ----------
+
+    [Fact]
+    public async Task Times_are_written_in_the_browsers_time_zone_with_its_offset()
+    {
+        var user = await SignedInAsync();
+        var chat = await ChatAsync(user);
+        var page = await (await GetAsync(user, $"/api/chat/{chat}/messages")).Content.ReadFromJsonAsync<JsonElement>(Json);
+        var firstUtc = page.GetProperty("items")[0].GetProperty("createdAt").GetDateTime().ToUniversalTime();
+        var firstInIndia = firstUtc.AddHours(5.5).ToString("yyyy-MM-dd HH:mm");
+
+        var txt = await (await GetAsync(user, $"/api/conversations/{chat}/export?timeZone=Asia/Kolkata")).Content.ReadAsStringAsync();
+        Assert.Contains("Time zone: Asia/Kolkata (UTC+05:30)", txt);
+        Assert.Contains($"You ({firstInIndia} UTC+05:30):", txt);
+        Assert.DoesNotContain(" UTC):", txt);
+
+        var pdfResponse = await GetAsync(user, $"/api/conversations/{chat}/export?format=pdf&timeZone=Asia%2FKolkata");
+        using var pdf = PdfDocument.Open(await pdfResponse.Content.ReadAsByteArrayAsync());
+        Assert.Contains($"{firstInIndia} UTC+05:30", string.Join(" ", pdf.GetPages().Select(p => p.Text)));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Mars/Olympus_Mons")]
+    [InlineData("../../etc/passwd")]
+    public async Task A_missing_or_unknown_time_zone_means_utc(string timeZone)
+    {
+        var user = await SignedInAsync();
+        var chat = await ChatAsync(user);
+
+        var url = $"/api/conversations/{chat}/export" + (timeZone.Length > 0 ? $"?timeZone={Uri.EscapeDataString(timeZone)}" : "");
+        var response = await GetAsync(user, url);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var txt = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Time zone: UTC", txt);
+        Assert.Contains(" UTC):", txt);
+    }
+
+    [Fact]
+    public async Task A_single_reply_export_uses_the_time_zone_too()
+    {
+        var user = await SignedInAsync();
+        var chat = await ChatAsync(user);
+        var page = await (await GetAsync(user, $"/api/chat/{chat}/messages")).Content.ReadFromJsonAsync<JsonElement>(Json);
+        var reply = page.GetProperty("items").EnumerateArray().Last();
+        var replyInNewYork = TimeZoneInfo.ConvertTimeFromUtc(reply.GetProperty("createdAt").GetDateTime().ToUniversalTime(),
+            TimeZoneInfo.FindSystemTimeZoneById("America/New_York"));
+
+        var response = await GetAsync(user, $"/api/messages/{reply.GetProperty("messageId").GetInt64()}/export?format=pdf&timeZone=America/New_York");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(replyInNewYork.ToString("yyyy-MM-dd HHmm"), response.Content.Headers.ContentDisposition!.FileNameStar);
+        using var pdf = PdfDocument.Open(await response.Content.ReadAsByteArrayAsync());
+        Assert.Matches(@"UTC-0[45]:00", string.Join(" ", pdf.GetPages().Select(p => p.Text)));
+    }
+
     [Fact]
     public async Task Another_users_chat_cannot_be_exported()
     {

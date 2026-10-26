@@ -7,14 +7,20 @@ namespace ChatGPTClone.Api.Services.Export;
 
 public interface IResponseExportService
 {
-    /// <summary>One chat message (normally an AI reply) generated as a real TXT/PDF/DOCX/XLSX file. 404 unless it's the user's.</summary>
-    Task<ExportedFile> ExportMessageAsync(int userId, long messageId, ExportFormat format, CancellationToken cancellationToken);
+    /// <summary>
+    /// One chat message (normally an AI reply) generated as a real TXT/PDF/DOCX/XLSX file. 404 unless it's the user's.
+    /// Its time is written in <paramref name="timeZone"/> (UTC when null).
+    /// </summary>
+    Task<ExportedFile> ExportMessageAsync(int userId, long messageId, ExportFormat format, CancellationToken cancellationToken,
+        UserTimeZone? timeZone = null);
 }
 
 public sealed class ResponseExportService(IMessageRepository messages, ILogger<ResponseExportService> logger) : IResponseExportService
 {
-    public async Task<ExportedFile> ExportMessageAsync(int userId, long messageId, ExportFormat format, CancellationToken cancellationToken)
+    public async Task<ExportedFile> ExportMessageAsync(int userId, long messageId, ExportFormat format, CancellationToken cancellationToken,
+        UserTimeZone? timeZone = null)
     {
+        var zone = timeZone ?? UserTimeZone.Utc;
         var message = await messages.GetOwnedAsync(messageId, userId, cancellationToken);
         if (message is null || message.Role == MessageRole.System)
         {
@@ -23,7 +29,7 @@ public sealed class ResponseExportService(IMessageRepository messages, ILogger<R
         }
 
         var title = message.Conversation.Title;
-        var context = new ExportContext(title, message.CreatedAt);
+        var context = new ExportContext(title, message.CreatedAt, zone);
         // Citation markers [file:123] become "(report.pdf, Page 3)".
         var blocks = MarkdownReader.Parse(Files.Citations.Readable(message));
 
@@ -50,7 +56,7 @@ public sealed class ResponseExportService(IMessageRepository messages, ILogger<R
                 "We couldn't create this file. Please try again or choose another format.", Reason("export_failed"));
         }
 
-        var fileName = $"AIChat reply - {ConversationExportService.SafeFileName(title)} - {message.CreatedAt:yyyy-MM-dd HHmm}{format.Extension()}";
+        var fileName = $"AIChat reply - {ConversationExportService.SafeFileName(title)} - {zone.ToLocal(message.CreatedAt):yyyy-MM-dd HHmm}{format.Extension()}";
         return new ExportedFile(fileName, format.ContentType(), content);
     }
 

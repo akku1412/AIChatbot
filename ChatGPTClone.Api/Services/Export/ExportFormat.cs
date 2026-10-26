@@ -30,8 +30,17 @@ public static class ExportFormats
     };
 }
 
-/// <summary>What a renderer needs besides the content: used for document titles and properties.</summary>
-public sealed record ExportContext(string Title, DateTime CreatedAtUtc);
+/// <summary>
+/// What a renderer needs besides the content: used for document titles and properties. Visible times are written in
+/// <paramref name="TimeZone"/> (UTC when not given); document metadata stays UTC.
+/// </summary>
+public sealed record ExportContext(string Title, DateTime CreatedAtUtc, UserTimeZone? TimeZone = null)
+{
+    public UserTimeZone Zone => TimeZone ?? UserTimeZone.Utc;
+
+    /// <summary>"2026-10-26 17:14 UTC+05:30" — the header line's time.</summary>
+    public string CreatedAtText => Zone.Format(CreatedAtUtc);
+}
 
 /// <summary>The content can't be produced in this format (e.g. XLSX from a reply without any table).</summary>
 public sealed class ExportNotPossibleException(string message) : Exception(message);

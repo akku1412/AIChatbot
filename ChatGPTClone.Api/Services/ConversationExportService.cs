@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using ChatGPTClone.Api.Interfaces;
@@ -13,13 +12,16 @@ public sealed record ExportedFile(string FileName, string ContentType, byte[] Co
 public interface IConversationExportService
 {
     /// <summary>The whole conversation as readable UTF-8 text. 404 when it isn't the user's.</summary>
-    Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken);
+    Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken,
+        UserTimeZone? timeZone = null);
 
     /// <summary>
     /// The whole conversation (oldest first, "You"/"AIChat" headings) as TXT, PDF or DOCX. 404 when it isn't the
-    /// user's; XLSX is for single replies with tables, so it isn't offered for whole chats.
+    /// user's; XLSX is for single replies with tables, so it isn't offered for whole chats. Times are written in
+    /// <paramref name="timeZone"/> (UTC when null).
     /// </summary>
-    Task<ExportedFile> ExportAsync(int userId, int conversationId, ExportFormat format, CancellationToken cancellationToken);
+    Task<ExportedFile> ExportAsync(int userId, int conversationId, ExportFormat format, CancellationToken cancellationToken,
+        UserTimeZone? timeZone = null);
 }
 
 public sealed partial class ConversationExportService(
@@ -30,11 +32,13 @@ public sealed partial class ConversationExportService(
 {
     private const string Rule = "------------------------------------------------------------";
 
-    public async Task<ExportedFile> ExportAsync(int userId, int conversationId, ExportFormat format, CancellationToken cancellationToken)
+    public async Task<ExportedFile> ExportAsync(int userId, int conversationId, ExportFormat format, CancellationToken cancellationToken,
+        UserTimeZone? timeZone = null)
     {
+        var zone = timeZone ?? UserTimeZone.Utc;
         if (format == ExportFormat.Txt)
         {
-            return await ExportAsTextAsync(userId, conversationId, cancellationToken);
+            return await ExportAsTextAsync(userId, conversationId, cancellationToken, zone);
         }
         if (format is not (ExportFormat.Pdf or ExportFormat.Docx))
         {
@@ -44,11 +48,11 @@ public sealed partial class ConversationExportService(
 
         var (conversation, shown) = await LoadThreadAsync(userId, conversationId, cancellationToken);
         var exportedAt = clock.GetUtcNow().UtcDateTime;
-        var blocks = ConversationBlocks(shown);
+        var blocks = ConversationBlocks(shown, zone);
         byte[] content;
         try
         {
-            var context = new ExportContext(conversation.Title, exportedAt);
+            var context = new ExportContext(conversation.Title, exportedAt, zone);
             content = format == ExportFormat.Pdf ? PdfRenderer.Render(blocks, context) : DocxRenderer.Render(blocks, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -59,7 +63,7 @@ public sealed partial class ConversationExportService(
                 new Dictionary<string, object?> { ["reason"] = "export_failed" });
         }
 
-        var fileName = $"AIChat - {SafeFileName(conversation.Title)} - {exportedAt:yyyy-MM-dd}{format.Extension()}";
+        var fileName = $"AIChat - {SafeFileName(conversation.Title)} - {zone.ToLocal(exportedAt):yyyy-MM-dd}{format.Extension()}";
         return new ExportedFile(fileName, format.ContentType(), content);
     }
 
@@ -67,7 +71,7 @@ public sealed partial class ConversationExportService(
     /// The chat as one document for the PDF/DOCX renderers: per message a "You"/"AIChat" heading with its time, attached
     /// file names, then the text (AI replies as Markdown with readable citations; user text as typed), separated by rules.
     /// </summary>
-    internal static List<DocBlock> ConversationBlocks(IReadOnlyList<Message> shown)
+    internal static List<DocBlock> ConversationBlocks(IReadOnlyList<Message> shown, UserTimeZone zone)
     {
         var blocks = new List<DocBlock>();
         foreach (var message in shown)
@@ -77,7 +81,7 @@ public sealed partial class ConversationExportService(
                 blocks.Add(new RuleBlock());
             }
             var who = message.Role == MessageRole.User ? "You" : "AIChat";
-            blocks.Add(new HeadingBlock(2, [new TextRun(who), new TextRun($" · {Format(message.CreatedAt)}", Italic: true)]));
+            blocks.Add(new HeadingBlock(2, [new TextRun(who), new TextRun($" · {zone.Format(message.CreatedAt)}", Italic: true)]));
 
             var attached = message.Attachments.Where(a => a.File is not null).Select(a => a.File.OriginalFileName).ToList();
             if (attached.Count > 0)
@@ -120,15 +124,18 @@ public sealed partial class ConversationExportService(
         return (conversation, all.Where(m => m.Role is MessageRole.User or MessageRole.Assistant).ToList());
     }
 
-    public async Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken)
+    public async Task<ExportedFile> ExportAsTextAsync(int userId, int conversationId, CancellationToken cancellationToken,
+        UserTimeZone? timeZone = null)
     {
+        var zone = timeZone ?? UserTimeZone.Utc;
         var (conversation, shown) = await LoadThreadAsync(userId, conversationId, cancellationToken);
         var exportedAt = clock.GetUtcNow().UtcDateTime;
 
         // CRLF so the file reads correctly in every editor, including old Notepad.
         var text = new StringBuilder();
         text.Append("Conversation: ").Append(conversation.Title).Append("\r\n");
-        text.Append("Exported: ").Append(Format(exportedAt)).Append("\r\n");
+        text.Append("Exported: ").Append(zone.Format(exportedAt)).Append("\r\n");
+        text.Append("Time zone: ").Append(zone.Describe(exportedAt)).Append("\r\n");
         text.Append("Messages: ").Append(shown.Count).Append("\r\n");
         text.Append(Rule.Replace('-', '=')).Append("\r\n");
 
@@ -136,7 +143,7 @@ public sealed partial class ConversationExportService(
         {
             text.Append("\r\n");
             text.Append(message.Role == MessageRole.User ? "You" : "AIChat")
-                .Append(" (").Append(Format(message.CreatedAt)).Append("):\r\n");
+                .Append(" (").Append(zone.Format(message.CreatedAt)).Append("):\r\n");
 
             var attached = message.Attachments.Where(a => a.File is not null).Select(a => a.File.OriginalFileName).ToList();
             if (attached.Count > 0)
@@ -154,14 +161,11 @@ public sealed partial class ConversationExportService(
             text.Append("\r\n").Append(Rule).Append("\r\n");
         }
 
-        var fileName = $"AIChat - {SafeFileName(conversation.Title)} - {exportedAt:yyyy-MM-dd}.txt";
+        var fileName = $"AIChat - {SafeFileName(conversation.Title)} - {zone.ToLocal(exportedAt):yyyy-MM-dd}.txt";
         // UTF-8 with a BOM so Windows editors never mistake Hindi or other non-English text for ANSI.
         var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(text.ToString())).ToArray();
         return new ExportedFile(fileName, "text/plain; charset=utf-8", bytes);
     }
-
-    private static string Format(DateTime utc) =>
-        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
 
     private static string NormalizeLineBreaks(string value) =>
         value.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");

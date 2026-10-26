@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { readBlobErrors } from '../http/api-error';
+import { browserTimeZone } from './time-zone';
 import {
   ChatStreamEvent,
   ConversationPatch,
@@ -109,17 +110,28 @@ export class ChatApiService {
     return this.http.delete<void>(`${this.conversationsUrl}/${conversationId}`);
   }
 
-  /** The whole conversation as a .txt file (the server names it in Content-Disposition). */
+  /**
+   * The whole conversation as a file (the server names it in Content-Disposition). Times in it are written in the
+   * browser's time zone.
+   */
   exportConversation(conversationId: number, format: ChatExportFormat = 'txt'): Observable<HttpResponse<Blob>> {
     return this.http
-      .get(`${this.conversationsUrl}/${conversationId}/export`, { params: { format }, observe: 'response', responseType: 'blob' })
+      .get(`${this.conversationsUrl}/${conversationId}/export`, {
+        params: { format, timeZone: browserTimeZone() },
+        observe: 'response',
+        responseType: 'blob',
+      })
       .pipe(readBlobErrors());
   }
 
-  /** One message (an AI reply) generated on the server as a real TXT, PDF, DOCX or XLSX file. */
+  /** One message (an AI reply) generated on the server as a real TXT, PDF, DOCX or XLSX file, timed in local time. */
   exportMessage(messageId: number, format: ExportFormat): Observable<HttpResponse<Blob>> {
     return this.http
-      .get(`${this.messagesUrl}/${messageId}/export`, { params: { format }, observe: 'response', responseType: 'blob' })
+      .get(`${this.messagesUrl}/${messageId}/export`, {
+        params: { format, timeZone: browserTimeZone() },
+        observe: 'response',
+        responseType: 'blob',
+      })
       .pipe(readBlobErrors());
   }
 

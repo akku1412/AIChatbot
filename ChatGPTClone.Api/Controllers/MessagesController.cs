@@ -81,7 +81,8 @@ public sealed class MessagesController(
 
     /// <summary>
     /// The message generated as a downloadable file: format = txt (plain text), pdf (formatted document),
-    /// docx (editable Word document) or xlsx (its tables as worksheets; 422 when it has none).
+    /// docx (editable Word document) or xlsx (its tables as worksheets; 422 when it has none). timeZone = the browser's
+    /// IANA zone (e.g. Asia/Kolkata) for the time written in the file; missing or unknown means UTC.
     /// </summary>
     [HttpGet("{messageId:long}/export")]
     [EnableRateLimiting(RateLimitPolicies.Exports)]
@@ -91,7 +92,8 @@ public sealed class MessagesController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
-    public async Task<IActionResult> Export(long messageId, [FromQuery] string? format, CancellationToken cancellationToken)
+    public async Task<IActionResult> Export(long messageId, [FromQuery] string? format, [FromQuery] string? timeZone,
+        CancellationToken cancellationToken)
     {
         if (!ExportFormats.TryParse(format, out var parsed))
         {
@@ -99,7 +101,7 @@ public sealed class MessagesController(
                 "Choose one of: txt, pdf, docx, xlsx.", new Dictionary<string, object?> { ["reason"] = "unsupported_format" });
         }
 
-        var file = await exports.ExportMessageAsync(User.GetUserId(), messageId, parsed, cancellationToken);
+        var file = await exports.ExportMessageAsync(User.GetUserId(), messageId, parsed, cancellationToken, UserTimeZone.From(timeZone));
         Response.Headers.CacheControl = "private, no-store";
         return File(file.Content, file.ContentType, file.FileName);
     }

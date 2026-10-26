@@ -7,6 +7,7 @@ import { AuthService } from '../auth/auth.service';
 import { errorMessage } from '../http/api-error';
 import { ChatStreamEvent } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
+import { browserTimeZone } from './time-zone';
 
 /** A fetch Response whose body arrives in the given chunks (like a real network stream). */
 function streamResponse(chunks: string[], status = 200, contentType = 'text/event-stream'): Response {
@@ -181,5 +182,32 @@ describe('ChatApiService', () => {
     const list = http.expectOne((r) => r.url === '/api/conversations');
     expect(list.request.params.get('archived')).toBe('true');
     list.flush({ items: [], page: 1, pageSize: 20, totalCount: 0, hasMore: false });
+  });
+
+  it("exports send the browser's IANA time zone", () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      timeZone: 'Asia/Kolkata',
+    } as Intl.ResolvedDateTimeFormatOptions);
+
+    api.exportConversation(7, 'pdf').subscribe();
+    const chat = http.expectOne((r) => r.url === '/api/conversations/7/export');
+    expect(chat.request.params.get('format')).toBe('pdf');
+    expect(chat.request.params.get('timeZone')).toBe('Asia/Kolkata');
+    chat.flush(new Blob());
+
+    api.exportMessage(42, 'docx').subscribe();
+    expect(http.expectOne((r) => r.url === '/api/messages/42/export').request.params.get('timeZone')).toBe('Asia/Kolkata');
+    vi.restoreAllMocks();
+  });
+});
+
+describe('browserTimeZone', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('falls back to UTC when the browser cannot tell', () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(() => {
+      throw new RangeError('no time zone data');
+    });
+    expect(browserTimeZone()).toBe('UTC');
   });
 });

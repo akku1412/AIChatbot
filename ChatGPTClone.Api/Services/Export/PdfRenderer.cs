@@ -42,7 +42,7 @@ public static class PdfRenderer
                 page.Header().PaddingBottom(10).BorderBottom(0.75f).BorderColor(Colors.Grey.Lighten2).PaddingBottom(4).Row(row =>
                 {
                     row.RelativeItem().Text(context.Title).FontSize(9).SemiBold().FontColor(Accent);
-                    row.AutoItem().Text($"AIChat · {context.CreatedAtUtc:yyyy-MM-dd HH:mm} UTC").FontSize(9).FontColor(Colors.Grey.Medium);
+                    row.AutoItem().Text($"AIChat · {context.CreatedAtText}").FontSize(9).FontColor(Colors.Grey.Medium);
                 });
 
                 page.Content().Column(column =>

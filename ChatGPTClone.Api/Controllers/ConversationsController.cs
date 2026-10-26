@@ -79,7 +79,8 @@ public sealed class ConversationsController(IConversationService conversations, 
 
     /// <summary>
     /// The whole conversation (the visible thread, oldest first, "You"/"AIChat" headings) as a download:
-    /// ?format=txt (default), pdf or docx.
+    /// ?format=txt (default), pdf or docx. &amp;timeZone = the browser's IANA zone (e.g. Asia/Kolkata): times in the file are
+    /// written in it, with the offset; missing or unknown means UTC.
     /// </summary>
     [HttpGet("{id:int}/export")]
     [EnableRateLimiting(RateLimitPolicies.Exports)]
@@ -87,14 +88,15 @@ public sealed class ConversationsController(IConversationService conversations, 
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Export(int id, [FromQuery] string? format, CancellationToken cancellationToken)
+    public async Task<IActionResult> Export(int id, [FromQuery] string? format, [FromQuery] string? timeZone,
+        CancellationToken cancellationToken)
     {
         if (!ExportFormats.TryParse(format ?? "txt", out var parsed))
         {
             return Problem(statusCode: StatusCodes.Status400BadRequest, title: "Unsupported format",
                 detail: "Whole chats can be exported as txt, pdf or docx.");
         }
-        var file = await exports.ExportAsync(User.GetUserId(), id, parsed, cancellationToken);
+        var file = await exports.ExportAsync(User.GetUserId(), id, parsed, cancellationToken, UserTimeZone.From(timeZone));
         Response.Headers.CacheControl = "private, no-store";
         // File() sets "Content-Disposition: attachment" with an RFC 5987 filename*, so non-English titles survive.
         return File(file.Content, file.ContentType, file.FileName);

@@ -27,7 +27,7 @@ public static class DocxRenderer
             var body = new Body();
             body.Append(new Paragraph(
                 new ParagraphProperties(new ParagraphStyleId { Val = "Subtitle" }),
-                TextRunElement($"{context.Title} · AIChat · {context.CreatedAtUtc:yyyy-MM-dd HH:mm} UTC", new TextRun(""))));
+                TextRunElement($"{context.Title} · AIChat · {context.CreatedAtText}", new TextRun(""))));
 
             foreach (var block in blocks)
             {
