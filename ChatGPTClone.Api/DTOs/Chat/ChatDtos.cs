@@ -15,7 +15,7 @@ public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSi
 /// <summary>
 /// Role is serialized lower-case ("user" / "assistant") to match the database and the Angular models.
 /// VersionNumber/VersionCount drive the "‹ 2/3 ›" arrows; IsTruncated means the user stopped the reply.
-/// Sources (AI replies) are the passages it was given; its "[file:ChunkId]" markers refer to them.
+/// Sources (AI replies) are the passages it cited as "[file:ChunkId]" that were really in its prompt (invented ids are dropped).
 /// </summary>
 public sealed record MessageDto(long MessageId, string Role, string Content, DateTime CreatedAt, int? TokenUsage,
     IReadOnlyList<AttachmentDto> Attachments, long? ParentMessageId, int VersionNumber, int VersionCount, bool IsTruncated,

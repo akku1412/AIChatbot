@@ -64,6 +64,31 @@ export interface ChatMessage {
   versionCount: number;
   /** The user stopped this reply before it finished. */
   isTruncated: boolean;
+  /** AI replies: the document passages it cited as [file:chunkId] (only real, owned passages; best match first). */
+  sources?: MessageSource[];
+}
+
+/** A passage an AI reply cites. */
+export interface MessageSource {
+  chunkId: number;
+  fileId: string;
+  fileName: string;
+  /** "Page 3", "Slide 4", "Sheet 'Q1'", … */
+  location: string;
+  /** The text was read from a scanned page or an image. */
+  isOcr: boolean;
+}
+
+/** GET /api/files/{fileId}/chunks/{chunkId}: the cited passage for the preview panel. */
+export interface ChunkPreview {
+  chunkId: number;
+  fileId: string;
+  fileName: string;
+  location: string;
+  content: string;
+  /** "text" or "ocr". */
+  source: string;
+  isSummary: boolean;
 }
 
 /** GET /api/messages/{id}/export?format=… */

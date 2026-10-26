@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { ChatMessage } from '../../../core/models/chat.models';
+import { SourcePreviewService } from '../../../core/services/source-preview.service';
 import { NotificationService } from '../toast/notification.service';
 import { ChatMessageView } from './chat-message';
 
@@ -207,6 +208,23 @@ describe('ChatMessageView', () => {
       expect(el.querySelector('.image-loading')).not.toBeNull();
       expect(errors).toEqual([]); // a missing thumbnail is not worth a toast
     });
+  });
+
+  it('lists cited sources under the reply and opens them in the source panel', async () => {
+    const source = { chunkId: 7, fileId: 'f-1', fileName: 'memo.pdf', location: 'Page 2', isOcr: false };
+    const el = await render({ ...reply, content: 'The deadline is 15 December [file:7].', sources: [source] });
+    const previews = TestBed.inject(SourcePreviewService);
+
+    const row = el.querySelector('[aria-label="Sources"]') as HTMLElement;
+    expect(row.querySelector('.source')?.getAttribute('aria-label')).toBe('Source: memo.pdf, Page 2');
+    (row.querySelector('.source') as HTMLButtonElement).click();
+    expect(previews.source()).toEqual(source);
+
+    previews.close();
+    (el.querySelector('button.citation') as HTMLButtonElement).click();
+    expect(previews.source()).toEqual(source);
+
+    expect((await render(reply)).querySelector('[aria-label="Sources"]')).toBeNull(); // no sources, no row
   });
 
   it('marks a stopped reply with "(stopped)"', async () => {

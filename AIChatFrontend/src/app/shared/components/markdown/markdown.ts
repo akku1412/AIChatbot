@@ -1,4 +1,4 @@
-import { Component, ViewEncapsulation, computed, inject, input } from '@angular/core';
+import { Component, ViewEncapsulation, computed, inject, input, output } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/core';
@@ -18,7 +18,9 @@ import sql from 'highlight.js/lib/languages/sql';
 import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
-import { Marked, Tokens } from 'marked';
+import { Marked, TokenizerAndRendererExtension, Tokens } from 'marked';
+
+import { MessageSource } from '../../../core/models/chat.models';
 
 // Only the languages people ask about most, to keep the bundle small (highlight.js core + 16 grammars).
 hljs.registerLanguage('csharp', csharp);
@@ -63,9 +65,52 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Sources of the reply being rendered. parse() is synchronous, so setting this around one call is safe.
+ * A citation whose id isn't here (invented, foreign, or the reply is still streaming) renders as nothing.
+ */
+let citationSources: ReadonlyMap<number, MessageSource> = new Map();
+
+/** Same syntax the server accepts: [file:12] or [file:12, file:13]. */
+const CITATION = /^\[\s*file:\d+(?:\s*[,;]\s*(?:file:)?\d+)*\s*\]/i;
+
+interface CitationToken extends Tokens.Generic {
+  type: 'citation';
+  raw: string;
+  ids: number[];
+}
+
+const citation: TokenizerAndRendererExtension = {
+  name: 'citation',
+  level: 'inline',
+  start(src: string): number | undefined {
+    const index = src.search(/\[\s*file:/i);
+    return index >= 0 ? index : undefined;
+  },
+  tokenizer(src: string): CitationToken | undefined {
+    const match = CITATION.exec(src);
+    if (!match) {
+      return undefined;
+    }
+    return { type: 'citation', raw: match[0], ids: Array.from(match[0].matchAll(/\d+/g), (m) => Number(m[0])) };
+  },
+  renderer(token: Tokens.Generic): string {
+    return (token as CitationToken).ids
+      .map((id) => citationSources.get(id))
+      .filter((source, i, all): source is MessageSource => !!source && all.indexOf(source) === i)
+      .map((source) => {
+        const label = escapeHtml(`${source.fileName}, ${source.location}`);
+        return `<button type="button" class="citation" data-chunk-id="${source.chunkId}" title="${label}" aria-label="Source: ${label}">` +
+          `${escapeHtml(source.location)}</button>`;
+      })
+      .join('');
+  },
+};
+
 const markdown = new Marked({
   gfm: true,
   breaks: false,
+  extensions: [citation],
   renderer: {
     // Raw HTML written by the model is shown as text, never interpreted.
     html(token: Tokens.HTML | Tokens.Tag): string {
@@ -119,15 +164,35 @@ export class MarkdownView {
   readonly content = input.required<string>();
   /** The reply is still arriving: shows a blinking caret after the text. */
   readonly streaming = input(false);
+  /** Passages the reply may cite; its [file:id] markers become clickable chips. */
+  readonly sources = input<readonly MessageSource[]>([]);
+  /** A citation chip was clicked. */
+  readonly cite = output<MessageSource>();
 
   protected readonly html = computed<SafeHtml>(() => {
-    const rendered = markdown.parse(this.content(), { async: false });
+    const sources = new Map(this.sources().map((s) => [s.chunkId, s]));
+    let rendered: string;
+    citationSources = sources;
+    try {
+      rendered = markdown.parse(this.content(), { async: false });
+    } finally {
+      citationSources = new Map();
+    }
     const clean = DOMPurify.sanitize(rendered, PURIFY_CONFIG);
     // Safe: `clean` is DOMPurify output. Angular's own sanitizer would strip the code-block buttons.
     return this.sanitizer.bypassSecurityTrustHtml(clean);
   });
 
   protected async onClick(event: MouseEvent): Promise<void> {
+    const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-chunk-id]');
+    if (chip) {
+      const source = this.sources().find((s) => s.chunkId === Number(chip.dataset['chunkId']));
+      if (source) {
+        this.cite.emit(source);
+      }
+      return;
+    }
+
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]');
     const code = button?.closest('.code-block')?.querySelector('code');
     if (!button || !code) {

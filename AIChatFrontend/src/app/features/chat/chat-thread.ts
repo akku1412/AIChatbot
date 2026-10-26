@@ -4,17 +4,19 @@ import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http/api-error';
 import { ChatStore } from '../../core/services/chat.store';
+import { SourcePreviewService } from '../../core/services/source-preview.service';
 import { AppLogo } from '../../shared/components/app-logo/app-logo';
 import { ChatMessageView } from '../../shared/components/chat-message/chat-message';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 import { ComposerSubmit, MessageInput } from '../../shared/components/message-input/message-input';
+import { SourcePanel } from '../../shared/components/source-panel/source-panel';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 import { TypingIndicator } from '../../shared/components/typing-indicator/typing-indicator';
 
 /** The open conversation (/chat/:conversationId) or a new chat (/chat). */
 @Component({
   selector: 'app-chat-thread',
-  imports: [RouterLink, AppLogo, ChatMessageView, MessageInput, TypingIndicator, LoadingSpinner],
+  imports: [RouterLink, AppLogo, ChatMessageView, MessageInput, TypingIndicator, LoadingSpinner, SourcePanel],
   templateUrl: './chat-thread.html',
   styleUrl: './chat-thread.css',
 })
@@ -23,6 +25,7 @@ export class ChatThread {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
+  private readonly sourcePreview = inject(SourcePreviewService);
 
   /** Route param (bound by withComponentInputBinding); undefined on /chat. */
   readonly conversationId = input<string>();
@@ -63,6 +66,7 @@ export class ChatThread {
     effect(() => {
       const raw = this.conversationId();
       untracked(() => {
+        this.sourcePreview.close(); // a source from the previous chat doesn't belong here
         if (raw === undefined) {
           if (!this.store.sending()) {
             this.store.startNewChat();

@@ -229,3 +229,26 @@
     animation: none;
   }
 }
+
+/* Citation chips: [file:123] markers in AI replies, opening the source panel. */
+.markdown .citation {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  vertical-align: 1px;
+  cursor: pointer;
+}
+
+.markdown .citation:hover,
+.markdown .citation:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}

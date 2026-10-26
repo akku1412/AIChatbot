@@ -2,11 +2,12 @@ import { Component, ElementRef, computed, inject, input, output, signal, viewChi
 import { finalize } from 'rxjs';
 
 import { errorMessage } from '../../../core/http/api-error';
-import { AttachmentInfo, ChatMessage, ExportFormat, MAX_MESSAGE_LENGTH } from '../../../core/models/chat.models';
+import { AttachmentInfo, ChatMessage, ExportFormat, MAX_MESSAGE_LENGTH, MessageSource } from '../../../core/models/chat.models';
 import { ChatApiService } from '../../../core/services/chat-api.service';
 import { safeFileName, saveResponse } from '../../../core/services/download';
 import { FileApiService } from '../../../core/services/file-api.service';
 import { ImagePreviewService } from '../../../core/services/image-preview.service';
+import { SourcePreviewService } from '../../../core/services/source-preview.service';
 import { AppLogo } from '../app-logo/app-logo';
 import { AttachmentChip } from '../attachment-chip/attachment-chip';
 import { MarkdownView } from '../markdown/markdown';
@@ -119,9 +120,21 @@ interface ExportOption {
             }
           }
         } @else {
-          <app-markdown [content]="message().content" [streaming]="streaming()" />
+          <app-markdown [content]="message().content" [streaming]="streaming()" [sources]="sources()" (cite)="openSource($event)" />
           @if (message().isTruncated && !streaming()) {
             <p class="stopped">(stopped)</p>
+          }
+          @if (sources().length && !streaming()) {
+            <div class="sources" role="group" aria-label="Sources">
+              <span class="sources-label">Sources</span>
+              @for (source of sources(); track source.chunkId) {
+                <button type="button" class="source" [title]="source.fileName + ', ' + source.location"
+                        [attr.aria-label]="'Source: ' + source.fileName + ', ' + source.location" (click)="openSource(source)">
+                  <span class="source-file">{{ source.fileName }}</span>
+                  <span class="source-where">{{ source.location }}</span>
+                </button>
+              }
+            </div>
           }
         }
         @if (!isUser() && !streaming()) {
@@ -200,6 +213,15 @@ interface ExportOption {
     }
     .user .body { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
     .files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 100%; }
+    .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+    .sources-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); margin-right: 2px; }
+    .source {
+      display: inline-flex; gap: 6px; max-width: 100%; padding: 3px 10px; border: 1px solid var(--border);
+      border-radius: 999px; background: var(--surface); color: var(--text); font: inherit; font-size: 0.75rem; cursor: pointer;
+    }
+    .source:hover, .source:focus-visible { border-color: var(--accent); }
+    .source-file { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .source-where { color: var(--text-muted); white-space: nowrap; }
     .image-file {
       width: 160px; height: 160px; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
       background: var(--surface-raised); cursor: zoom-in; display: grid; place-items: center;
@@ -285,6 +307,14 @@ export class ChatMessageView {
   private readonly chatApi = inject(ChatApiService);
   private readonly fileApi = inject(FileApiService);
   private readonly previews = inject(ImagePreviewService);
+  private readonly sourcePreview = inject(SourcePreviewService);
+
+  /** Passages this reply cited (the server keeps only real, owned ones). */
+  protected readonly sources = computed(() => this.message().sources ?? []);
+
+  protected openSource(source: MessageSource): void {
+    this.sourcePreview.show(source);
+  }
 
   /** Thumbnail URLs of this message's images (fetched once, shared with every view of the same file). */
   protected readonly imageUrls = computed(

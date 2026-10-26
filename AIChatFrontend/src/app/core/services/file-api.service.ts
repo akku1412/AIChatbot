@@ -4,7 +4,7 @@ import { Observable, exhaustMap, retry, takeWhile, timer } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { readBlobErrors } from '../http/api-error';
-import { DEFAULT_UPLOAD_LIMITS, UploadLimits, UploadedFile } from '../models/chat.models';
+import { ChunkPreview, DEFAULT_UPLOAD_LIMITS, UploadLimits, UploadedFile } from '../models/chat.models';
 
 /** True while the server is still reading the file. */
 export function isProcessing(file: UploadedFile): boolean {
@@ -64,6 +64,11 @@ export class FileApiService {
       retry({ count: 3, delay: intervalMs }),
       takeWhile((file) => isProcessing(file), true),
     );
+  }
+
+  /** One cited passage (owner only; anything else is 404). */
+  getChunk(fileId: string, chunkId: number): Observable<ChunkPreview> {
+    return this.http.get<ChunkPreview>(`${this.url}/${fileId}/chunks/${chunkId}`);
   }
 
   /** The original uploaded file (owner only); the server names it in Content-Disposition. */
