@@ -31,8 +31,19 @@ public sealed class UserService(IUserRepository userRepository) : IUserService
             settings = new UserSettings { UserId = userId };
             userRepository.AddSettings(settings);
         }
-        settings.AboutMe = Clean(request.AboutMe);
-        settings.ResponseStyle = Clean(request.ResponseStyle);
+        // Only the fields that were sent change (null = leave as is; blank text clears an instruction).
+        if (request.AboutMe is not null)
+        {
+            settings.AboutMe = Clean(request.AboutMe);
+        }
+        if (request.ResponseStyle is not null)
+        {
+            settings.ResponseStyle = Clean(request.ResponseStyle);
+        }
+        if (request.Theme is not null)
+        {
+            settings.Theme = request.Theme == "system" ? null : request.Theme; // null = follow the device
+        }
         await userRepository.SaveChangesAsync(cancellationToken);
         return UserSettingsDto.From(settings);
     }

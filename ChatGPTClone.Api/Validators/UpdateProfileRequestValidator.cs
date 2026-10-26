@@ -21,5 +21,9 @@ public sealed class UpdateUserSettingsRequestValidator : AbstractValidator<Updat
         const int max = UserSettings.MaxInstructionLength;
         RuleFor(r => r.AboutMe).MaximumLength(max).WithMessage($"\"About you\" must be {max} characters or fewer.");
         RuleFor(r => r.ResponseStyle).MaximumLength(max).WithMessage($"\"How to respond\" must be {max} characters or fewer.");
+        RuleFor(r => r.Theme)
+            .Must(t => UserSettings.Themes.Contains(t))
+            .When(r => r.Theme is not null)
+            .WithMessage("Theme must be \"system\", \"light\" or \"dark\".");
     }
 }

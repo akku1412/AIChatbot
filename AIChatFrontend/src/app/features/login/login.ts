@@ -3,6 +3,7 @@ import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angula
 import { Router } from '@angular/router';
 
 import { AuthService } from '../../core/auth/auth.service';
+import { ThemeService } from '../../core/services/theme.service';
 import { GoogleIdentityService } from '../../core/auth/google-identity.service';
 import { errorMessage, safeReturnUrl } from '../../core/http/api-error';
 import { AppLogo } from '../../shared/components/app-logo/app-logo';
@@ -22,6 +23,7 @@ const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export class Login {
   private readonly auth = inject(AuthService);
   private readonly googleIdentity = inject(GoogleIdentityService);
+  private readonly themeService = inject(ThemeService);
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
 
@@ -61,7 +63,7 @@ export class Login {
   protected async renderGoogleButton(): Promise<void> {
     this.googleError.set(null);
     const host = this.buttonHost().nativeElement;
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = this.themeService.theme() === 'dark'; // the chosen theme, or the device's
     try {
       // Measure only after web fonts and layout have settled, or the width comes out too small.
       await document.fonts.ready;

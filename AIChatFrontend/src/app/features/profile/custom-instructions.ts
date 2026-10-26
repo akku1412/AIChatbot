@@ -72,7 +72,7 @@ export class CustomInstructions {
   protected readonly max = MAX_INSTRUCTION_LENGTH;
   protected readonly aboutMe = signal('');
   protected readonly responseStyle = signal('');
-  private readonly saved = signal<UserSettings>({ aboutMe: null, responseStyle: null });
+  private readonly saved = signal<UserSettings>({ aboutMe: null, responseStyle: null, theme: 'system' });
   protected readonly loaded = signal(false);
   protected readonly loadError = signal<string | null>(null);
   protected readonly saving = signal(false);

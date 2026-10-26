@@ -270,6 +270,14 @@ export function highlightMatches(text: string, query: string): TextPart[] {
               <span class="email">{{ u.email }}</span>
             </span>
           </a>
+          <button type="button" class="icon-button" [attr.aria-label]="theme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+                  [title]="theme() === 'dark' ? 'Light theme' : 'Dark theme'" (click)="toggleTheme.emit()">
+            @if (theme() === 'dark') {
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            } @else {
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            }
+          </button>
           <button type="button" class="icon-button" aria-label="Log out" title="Log out" (click)="logout.emit()">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
@@ -295,6 +303,8 @@ export class Sidebar {
   readonly archivedLoading = input(false);
   /** Targets for "Move to project" in each chat's menu. */
   readonly projects = input<Pick<Project, 'projectId' | 'name'>[]>([]);
+  /** What is on screen, for the sun/moon button. */
+  readonly theme = input<'light' | 'dark'>('light');
 
   /** Debounced search text ("" when cleared). */
   readonly search = output<string>();
@@ -311,6 +321,7 @@ export class Sidebar {
   readonly remove = output<ConversationSummary>();
   readonly exportChat = output<ConversationSummary>();
   readonly move = output<MoveRequest>();
+  readonly toggleTheme = output<void>();
 
   protected readonly titleMax = TITLE_MAX;
   protected readonly imageFailed = signal(false);

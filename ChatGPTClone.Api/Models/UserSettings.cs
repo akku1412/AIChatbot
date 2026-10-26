@@ -8,6 +8,8 @@ public class UserSettings : IAuditable
 {
     public const int MaxInstructionLength = 1500;
 
+    public static readonly string[] Themes = ["system", "light", "dark"];
+
     public int UserId { get; set; }
 
     /// <summary>"What should AIChat know about you?"</summary>
@@ -15,6 +17,9 @@ public class UserSettings : IAuditable
 
     /// <summary>"How should AIChat respond?"</summary>
     public string? ResponseStyle { get; set; }
+
+    /// <summary>"light", "dark" or null (follow the device's setting).</summary>
+    public string? Theme { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

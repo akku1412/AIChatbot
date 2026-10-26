@@ -649,6 +649,11 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .HasMaxLength(1500)
                         .HasColumnType("nvarchar(1500)");
 
+                    b.Property<string>("Theme")
+                        .HasMaxLength(10)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(10)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2(3)");
 

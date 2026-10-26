@@ -915,3 +915,28 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026094352_Phase3Theme'
+)
+BEGIN
+    ALTER TABLE [UserSettings] ADD [Theme] varchar(10) NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026094352_Phase3Theme'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261026094352_Phase3Theme', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+

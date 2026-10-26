@@ -13,6 +13,7 @@ public sealed class UserSettingsConfiguration : IEntityTypeConfiguration<UserSet
 
         builder.Property(s => s.AboutMe).HasMaxLength(UserSettings.MaxInstructionLength);
         builder.Property(s => s.ResponseStyle).HasMaxLength(UserSettings.MaxInstructionLength);
+        builder.Property(s => s.Theme).HasMaxLength(10).IsUnicode(false);
         builder.Property(s => s.CreatedAt).HasColumnType("datetime2(3)");
         builder.Property(s => s.UpdatedAt).HasColumnType("datetime2(3)");
 

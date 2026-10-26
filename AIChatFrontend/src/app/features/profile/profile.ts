@@ -9,13 +9,14 @@ import { UserApiService } from '../../core/services/user-api.service';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 import { NotificationService } from '../../shared/components/toast/notification.service';
+import { AppearanceSettings } from './appearance-settings';
 import { CustomInstructions } from './custom-instructions';
 
 const NAME_MAX = 200;
 
 @Component({
   selector: 'app-profile',
-  imports: [ReactiveFormsModule, DatePipe, LoadingSpinner, CustomInstructions],
+  imports: [ReactiveFormsModule, DatePipe, LoadingSpinner, CustomInstructions, AppearanceSettings],
   templateUrl: './profile.html',
   styleUrls: ['./profile-card.css', './profile.css'],
 })

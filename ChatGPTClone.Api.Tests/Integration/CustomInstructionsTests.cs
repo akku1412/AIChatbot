@@ -59,6 +59,37 @@ public sealed class CustomInstructionsTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task The_theme_is_saved_without_touching_the_instructions_and_vice_versa()
+    {
+        var user = await SignedInAsync();
+        Assert.Equal("system", (await GetAsync(user)).GetProperty("theme").GetString()); // default: follow the device
+
+        await PutAsync(user, new { aboutMe = "I teach chemistry.", responseStyle = "Bullet points." });
+        Assert.Equal(HttpStatusCode.OK, (await PutAsync(user, new { theme = "dark" })).StatusCode);
+
+        var settings = await GetAsync(user);
+        Assert.Equal("dark", settings.GetProperty("theme").GetString());
+        Assert.Equal("I teach chemistry.", settings.GetProperty("aboutMe").GetString()); // a theme-only save keeps them
+        Assert.Equal("Bullet points.", settings.GetProperty("responseStyle").GetString());
+
+        await PutAsync(user, new { aboutMe = "I teach physics.", responseStyle = "Bullet points." }); // the instructions form
+        Assert.Equal("dark", (await GetAsync(user)).GetProperty("theme").GetString());
+
+        await PutAsync(user, new { theme = "system" });
+        Assert.Equal("system", (await GetAsync(user)).GetProperty("theme").GetString());
+    }
+
+    [Theory]
+    [InlineData("Dark")]
+    [InlineData("blue")]
+    [InlineData("")]
+    public async Task Unknown_themes_are_refused(string theme)
+    {
+        var user = await SignedInAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, (await PutAsync(user, new { theme })).StatusCode);
+    }
+
+    [Fact]
     public async Task Each_field_is_limited_to_1500_characters()
     {
         var user = await SignedInAsync();

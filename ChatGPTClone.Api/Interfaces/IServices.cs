@@ -54,6 +54,6 @@ public interface IUserService
     /// <summary>Custom instructions; empty when never saved.</summary>
     Task<UserSettingsDto> GetSettingsAsync(int userId, CancellationToken cancellationToken);
 
-    /// <summary>Replaces both custom instructions (trimmed; blank = cleared).</summary>
+    /// <summary>Saves the fields that are present: custom instructions (trimmed; blank = cleared) and the theme.</summary>
     Task<UserSettingsDto> UpdateSettingsAsync(int userId, UpdateUserSettingsRequest request, CancellationToken cancellationToken);
 }

@@ -23,8 +23,8 @@ export class UserApiService {
     return this.http.get<UserSettings>(`${this.url}/settings`);
   }
 
-  /** Replaces both instructions; blank clears a field. */
-  updateSettings(settings: UserSettings): Observable<UserSettings> {
+  /** Saves the fields that are present (missing ones stay as they are); a blank instruction clears it. */
+  updateSettings(settings: Partial<UserSettings>): Observable<UserSettings> {
     return this.http.put<UserSettings>(`${this.url}/settings`, settings);
   }
 }
@@ -33,6 +33,8 @@ export class UserApiService {
 export interface UserSettings {
   aboutMe: string | null;
   responseStyle: string | null;
+  /** "system" follows the device. */
+  theme: 'system' | 'light' | 'dark';
 }
 
 /** Same limit as the API (UserSettings.MaxInstructionLength). */

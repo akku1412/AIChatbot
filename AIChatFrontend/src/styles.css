@@ -35,8 +35,41 @@
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
 }
 
+/*
+ * Theme: <html data-theme="light|dark"> is the user's choice (ThemeService); without it the device's setting applies.
+ * The dark palette is written twice (forced, and from the device) because plain CSS can't share one block between a
+ * selector and a media query. Keep the two blocks identical.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #14151a;
+  --surface: #1c1e25;
+  --surface-hover: #262833;
+  --surface-raised: #1e2028;
+  --sidebar-bg: #0f1014;
+  --border: #2a2d38;
+  --border-strong: #3a3e4b;
+  --text: #e8e9ee;
+  --text-muted: #9aa0ad;
+
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-contrast: #0f1014;
+
+  --danger: #f87171;
+  --success: #4ade80;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 24px 60px rgb(0 0 0 / 0.45);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #14151a;
     --surface: #1c1e25;
     --surface-hover: #262833;

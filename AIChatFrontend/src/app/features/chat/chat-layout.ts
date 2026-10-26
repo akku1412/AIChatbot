@@ -9,6 +9,7 @@ import { ConversationSummary } from '../../core/models/chat.models';
 import { ChatApiService } from '../../core/services/chat-api.service';
 import { ChatStore } from '../../core/services/chat.store';
 import { ProjectService } from '../../core/services/project.service';
+import { ThemeService } from '../../core/services/theme.service';
 import { fileNameFromDisposition, safeFileName, saveBlob } from '../../core/services/download';
 import { AppHeader } from '../../shared/components/app-header/app-header';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
@@ -39,6 +40,8 @@ import { NotificationService } from '../../shared/components/toast/notification.
           [archived]="store.archivedConversations()"
           [archivedLoading]="store.archivedLoading()"
           [projects]="projects.projects()"
+          [theme]="themeService.theme()"
+          (toggleTheme)="themeService.toggle()"
           (move)="move($event)"
           (search)="store.search($event)"
           (pin)="pin($event)"
@@ -88,6 +91,7 @@ import { NotificationService } from '../../shared/components/toast/notification.
 export class ChatLayout {
   protected readonly store = inject(ChatStore);
   protected readonly projects = inject(ProjectService);
+  protected readonly themeService = inject(ThemeService);
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
@@ -129,6 +133,7 @@ export class ChatLayout {
 
   constructor() {
     this.store.loadConversations();
+    this.themeService.loadFromAccount(); // the account's theme follows the user to other devices
   }
 
   /** Downloads the whole conversation (all messages, not just the loaded page) as a .txt file from the API. */
