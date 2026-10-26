@@ -18,6 +18,11 @@ public sealed class UserRepository(AppDbContext db) : IUserRepository
 
     public void Add(User user) => db.Users.Add(user);
 
+    public Task<UserSettings?> GetSettingsAsync(int userId, CancellationToken cancellationToken) =>
+        db.UserSettings.FirstOrDefaultAsync(s => s.UserId == userId, cancellationToken);
+
+    public void AddSettings(UserSettings settings) => db.UserSettings.Add(settings);
+
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
 
     public void DiscardPendingChanges()

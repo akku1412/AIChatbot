@@ -1,0 +1,52 @@
+/* Cards and buttons shared by the profile page and its sections (e.g. custom instructions). */
+
+.card {
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn.small {
+  padding: 5px 12px;
+}
+
+.secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.primary {
+  background: var(--brand-gradient);
+  color: #fff;
+}
+

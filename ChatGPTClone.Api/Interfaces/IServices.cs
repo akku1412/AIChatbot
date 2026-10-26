@@ -50,4 +50,10 @@ public interface IUserService
 {
     Task<UserDto> GetAsync(int userId, CancellationToken cancellationToken);
     Task<UserDto> UpdateProfileAsync(int userId, string fullName, CancellationToken cancellationToken);
+
+    /// <summary>Custom instructions; empty when never saved.</summary>
+    Task<UserSettingsDto> GetSettingsAsync(int userId, CancellationToken cancellationToken);
+
+    /// <summary>Replaces both custom instructions (trimmed; blank = cleared).</summary>
+    Task<UserSettingsDto> UpdateSettingsAsync(int userId, UpdateUserSettingsRequest request, CancellationToken cancellationToken);
 }

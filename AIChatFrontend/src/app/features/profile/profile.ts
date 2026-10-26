@@ -9,14 +9,15 @@ import { UserApiService } from '../../core/services/user-api.service';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
 import { LoadingSpinner } from '../../shared/components/loading-spinner/loading-spinner';
 import { NotificationService } from '../../shared/components/toast/notification.service';
+import { CustomInstructions } from './custom-instructions';
 
 const NAME_MAX = 200;
 
 @Component({
   selector: 'app-profile',
-  imports: [ReactiveFormsModule, DatePipe, LoadingSpinner],
+  imports: [ReactiveFormsModule, DatePipe, LoadingSpinner, CustomInstructions],
   templateUrl: './profile.html',
-  styleUrl: './profile.css',
+  styleUrls: ['./profile-card.css', './profile.css'],
 })
 export class Profile {
   protected readonly auth = inject(AuthService);

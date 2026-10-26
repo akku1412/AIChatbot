@@ -484,6 +484,30 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.ToTable("Users", (string)null);
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UserSettings", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AboutMe")
+                        .HasMaxLength(1500)
+                        .HasColumnType("nvarchar(1500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("ResponseStyle")
+                        .HasMaxLength(1500)
+                        .HasColumnType("nvarchar(1500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("UserSettings", (string)null);
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.ChunkEmbedding", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.DocumentChunk", "Chunk")
@@ -589,6 +613,17 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UserSettings", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.User", "User")
+                        .WithOne()
+                        .HasForeignKey("ChatGPTClone.Api.Models.UserSettings", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

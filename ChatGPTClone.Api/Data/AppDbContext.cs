@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
     public DbSet<ChunkEmbedding> ChunkEmbeddings => Set<ChunkEmbedding>();
     public DbSet<MessageSource> MessageSources => Set<MessageSource>();
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -670,3 +670,36 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026050603_Phase3CustomInstructions'
+)
+BEGIN
+    CREATE TABLE [UserSettings] (
+        [UserId] int NOT NULL,
+        [AboutMe] nvarchar(1500) NULL,
+        [ResponseStyle] nvarchar(1500) NULL,
+        [CreatedAt] datetime2(3) NOT NULL,
+        [UpdatedAt] datetime2(3) NOT NULL,
+        CONSTRAINT [PK_UserSettings] PRIMARY KEY ([UserId]),
+        CONSTRAINT [FK_UserSettings_Users_UserId] FOREIGN KEY ([UserId]) REFERENCES [Users] ([UserId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026050603_Phase3CustomInstructions'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261026050603_Phase3CustomInstructions', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+
