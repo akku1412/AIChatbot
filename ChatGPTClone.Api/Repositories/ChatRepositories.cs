@@ -9,10 +9,10 @@ namespace ChatGPTClone.Api.Repositories;
 public sealed class ConversationRepository(AppDbContext db) : IConversationRepository
 {
     public async Task<(List<Conversation> Items, int TotalCount)> ListAsync(int userId, int page, int pageSize, bool archived,
-        CancellationToken cancellationToken)
+        int? projectId, CancellationToken cancellationToken)
     {
         var query = db.Conversations.AsNoTracking()
-            .Where(c => c.UserId == userId && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
+            .Where(c => c.UserId == userId && (archived ? c.ArchivedAt != null : c.ArchivedAt == null) && c.ProjectId == projectId);
         var total = await query.CountAsync(cancellationToken);
         var ordered = archived
             ? query.OrderByDescending(c => c.ArchivedAt).ThenByDescending(c => c.ConversationId)

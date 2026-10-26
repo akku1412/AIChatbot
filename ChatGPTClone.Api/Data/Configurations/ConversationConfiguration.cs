@@ -37,5 +37,13 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
         builder.HasIndex(c => new { c.UserId, c.ArchivedAt, c.IsPinned, c.UpdatedAt })
             .IsDescending(false, false, true, true)
             .HasDatabaseName("IX_Conversations_UserId_Archived_Pinned_UpdatedAt");
+
+        // NO ACTION: SQL Server forbids a second cascade/set-null path (Users -> Projects -> Conversations).
+        // ProjectService moves a project's chats back to the main list before deleting the project.
+        builder.HasOne(c => c.Project)
+            .WithMany(p => p.Conversations)
+            .HasForeignKey(c => c.ProjectId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(c => c.ProjectId).HasDatabaseName("IX_Conversations_ProjectId");
     }
 }

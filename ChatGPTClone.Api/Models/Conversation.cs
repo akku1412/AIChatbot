@@ -22,6 +22,10 @@ public class Conversation : IAuditable
     /// <summary>The model picked for this chat (an Ai:Models id); null = the default model.</summary>
     public string? ModelId { get; set; }
 
+    /// <summary>The project this chat belongs to; null = a chat in the main list.</summary>
+    public int? ProjectId { get; set; }
+    public Project? Project { get; set; }
+
     public User User { get; set; } = null!;
     public ICollection<Message> Messages { get; set; } = new List<Message>();
 }

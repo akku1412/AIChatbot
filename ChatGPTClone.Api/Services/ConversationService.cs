@@ -9,11 +9,17 @@ namespace ChatGPTClone.Api.Services;
 public interface IConversationService
 {
     /// <summary>The main list (pinned first) or, with <paramref name="archived"/>, the archived chats.</summary>
-    Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived, CancellationToken cancellationToken);
+    /// Only chats in <paramref name="projectId"/>; null = chats in no project.
+    Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived, int? projectId,
+        CancellationToken cancellationToken);
     Task<ConversationDto> GetAsync(int userId, int conversationId, CancellationToken cancellationToken);
     /// <param name="modelId">An allow-listed model id (checked by the request validator); null = default.</param>
-    Task<ConversationDto> CreateAsync(int userId, string? title, string? modelId, CancellationToken cancellationToken);
+    /// <param name="projectId">One of the user's projects (404 otherwise); null = no project.</param>
+    Task<ConversationDto> CreateAsync(int userId, string? title, string? modelId, int? projectId, CancellationToken cancellationToken);
     Task<ConversationDto> RenameAsync(int userId, int conversationId, string title, CancellationToken cancellationToken);
+
+    /// <summary>Moves the chat into one of the user's projects, or back to the main list with null.</summary>
+    Task<ConversationDto> MoveAsync(int userId, int conversationId, int? projectId, CancellationToken cancellationToken);
 
     /// <summary>Changes only the fields that are set: title, pinned, archived.</summary>
     Task<ConversationDto> PatchAsync(int userId, int conversationId, PatchConversationRequest request, CancellationToken cancellationToken);
@@ -27,14 +33,19 @@ public interface IConversationService
     Task<Conversation> GetOwnedOrThrowAsync(int userId, int conversationId, CancellationToken cancellationToken);
 }
 
-public sealed partial class ConversationService(IConversationRepository repository, IMessageRepository messages) : IConversationService
+public sealed partial class ConversationService(IConversationRepository repository, IMessageRepository messages,
+    IProjectService projects) : IConversationService
 {
     public const string DefaultTitle = "New chat";
 
-    public async Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived,
+    public async Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived, int? projectId,
         CancellationToken cancellationToken)
     {
-        var (items, total) = await repository.ListAsync(userId, page, pageSize, archived, cancellationToken);
+        if (projectId is { } id)
+        {
+            await projects.EnsureOwnedAsync(userId, id, cancellationToken);
+        }
+        var (items, total) = await repository.ListAsync(userId, page, pageSize, archived, projectId, cancellationToken);
         return new PagedResult<ConversationDto>(
             items.Select(ConversationDto.From).ToList(), page, pageSize, total, page * pageSize < total);
     }
@@ -42,13 +53,19 @@ public sealed partial class ConversationService(IConversationRepository reposito
     public async Task<ConversationDto> GetAsync(int userId, int conversationId, CancellationToken cancellationToken) =>
         ConversationDto.From(await GetOwnedOrThrowAsync(userId, conversationId, cancellationToken));
 
-    public async Task<ConversationDto> CreateAsync(int userId, string? title, string? modelId, CancellationToken cancellationToken)
+    public async Task<ConversationDto> CreateAsync(int userId, string? title, string? modelId, int? projectId,
+        CancellationToken cancellationToken)
     {
+        if (projectId is { } id)
+        {
+            await projects.EnsureOwnedAsync(userId, id, cancellationToken);
+        }
         var conversation = new Conversation
         {
             UserId = userId,
             Title = string.IsNullOrWhiteSpace(title) ? DefaultTitle : title.Trim(),
             ModelId = modelId,
+            ProjectId = projectId,
         };
         repository.Add(conversation);
         await repository.SaveChangesAsync(cancellationToken);
@@ -60,6 +77,18 @@ public sealed partial class ConversationService(IConversationRepository reposito
     {
         var conversation = await GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
         conversation.Title = title.Trim();
+        await repository.SaveChangesAsync(cancellationToken);
+        return ConversationDto.From(conversation);
+    }
+
+    public async Task<ConversationDto> MoveAsync(int userId, int conversationId, int? projectId, CancellationToken cancellationToken)
+    {
+        var conversation = await GetOwnedOrThrowAsync(userId, conversationId, cancellationToken);
+        if (projectId is { } id)
+        {
+            await projects.EnsureOwnedAsync(userId, id, cancellationToken); // another user's project: 404
+        }
+        conversation.ProjectId = projectId; // not "activity": the sidebar order is unchanged
         await repository.SaveChangesAsync(cancellationToken);
         return ConversationDto.From(conversation);
     }
@@ -106,7 +135,8 @@ public sealed partial class ConversationService(IConversationRepository reposito
                 h.Conversation.ArchivedAt,
                 h.Conversation.Title.Contains(term, StringComparison.OrdinalIgnoreCase),
                 h.MatchingMessageId is { } id && contents.TryGetValue(id, out var content) ? Snippet(content, term) : null,
-                h.MatchingMessageId))
+                h.MatchingMessageId,
+                h.Conversation.ProjectId))
             .ToList();
     }
 

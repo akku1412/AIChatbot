@@ -152,9 +152,10 @@ public sealed class FileService(
     {
         var file = await GetOwnedAsync(userId, fileId, cancellationToken);
 
-        // Attachment and citation links use NO ACTION (SQL Server multiple-cascade-path rule), so remove them first.
+        // Attachment, citation and project links use NO ACTION (SQL Server multiple-cascade-path rule), so remove them first.
         await db.MessageAttachments.Where(a => a.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
         await db.MessageSources.Where(s => s.Chunk.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
+        await db.ProjectFiles.Where(pf => pf.FileId == fileId).ExecuteDeleteAsync(cancellationToken);
         db.UploadedFiles.Remove(file); // chunks and their embeddings cascade
         await db.SaveChangesAsync(cancellationToken);
 

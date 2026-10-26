@@ -3,12 +3,12 @@ using ChatGPTClone.Api.Models;
 
 namespace ChatGPTClone.Api.DTOs.Chat;
 
-/// <summary>ModelId: the chat's picked model (an id from GET /api/models); null = the default model.</summary>
+/// <summary>ModelId: the chat's picked model (an id from GET /api/models); null = the default model. ProjectId: its project, or null.</summary>
 public sealed record ConversationDto(int ConversationId, string Title, DateTime CreatedAt, DateTime UpdatedAt,
-    bool IsPinned, DateTime? ArchivedAt, string? ModelId)
+    bool IsPinned, DateTime? ArchivedAt, string? ModelId, int? ProjectId)
 {
     public static ConversationDto From(Conversation c) =>
-        new(c.ConversationId, c.Title, c.CreatedAt, c.UpdatedAt, c.IsPinned, c.ArchivedAt, c.ModelId);
+        new(c.ConversationId, c.Title, c.CreatedAt, c.UpdatedAt, c.IsPinned, c.ArchivedAt, c.ModelId, c.ProjectId);
 }
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, bool HasMore);
@@ -63,7 +63,8 @@ public sealed record ConversationSearchResultDto(
     DateTime? ArchivedAt,
     bool TitleMatches,
     string? Snippet,
-    long? MessageId);
+    long? MessageId,
+    int? ProjectId = null);
 
 // ----- Requests -----
 
@@ -74,6 +75,9 @@ public sealed class ListConversationsQuery
 
     /// <summary>false (default): the main list; true: only archived chats.</summary>
     public bool Archived { get; init; }
+
+    /// <summary>Only this project's chats; omitted = chats that are in no project.</summary>
+    public int? ProjectId { get; init; }
 }
 
 public sealed class MessagesQuery
@@ -89,8 +93,11 @@ public sealed class SearchConversationsQuery
     public int Limit { get; init; } = 20;
 }
 
-/// <summary>ModelId: an id from GET /api/models; omitted = the default model.</summary>
-public sealed record CreateConversationRequest(string? Title, string? ModelId = null);
+/// <summary>ModelId: an id from GET /api/models (omitted = default). ProjectId: one of your projects (omitted = none).</summary>
+public sealed record CreateConversationRequest(string? Title, string? ModelId = null, int? ProjectId = null);
+
+/// <summary>PUT /api/conversations/{id}/project: move the chat into a project, or out of it with null.</summary>
+public sealed record MoveConversationRequest(int? ProjectId);
 
 public sealed record RenameConversationRequest(string Title);
 

@@ -17,6 +17,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ChunkEmbedding> ChunkEmbeddings => Set<ChunkEmbedding>();
     public DbSet<MessageSource> MessageSources => Set<MessageSource>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

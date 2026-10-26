@@ -72,6 +72,9 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .IsUnicode(false)
                         .HasColumnType("varchar(32)");
 
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -84,6 +87,9 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("ConversationId");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("IX_Conversations_ProjectId");
 
                     b.HasIndex("UserId", "UpdatedAt")
                         .IsDescending(false, true)
@@ -311,6 +317,59 @@ namespace ChatGPTClone.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.Project", b =>
+                {
+                    b.Property<int>("ProjectId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ProjectId"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Instructions")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("ProjectId");
+
+                    b.HasIndex("UserId", "Name")
+                        .HasDatabaseName("IX_Projects_UserId_Name");
+
+                    b.ToTable("Projects", (string)null);
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.ProjectFile", b =>
+                {
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("ProjectId", "FileId");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("IX_ProjectFiles_FileId");
+
+                    b.ToTable("ProjectFiles", (string)null);
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.RefreshToken", b =>
                 {
                     b.Property<int>("RefreshTokenId")
@@ -521,11 +580,18 @@ namespace ChatGPTClone.Api.Data.Migrations
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.Conversation", b =>
                 {
+                    b.HasOne("ChatGPTClone.Api.Models.Project", "Project")
+                        .WithMany("Conversations")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
                         .WithMany("Conversations")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Project");
 
                     b.Navigation("User");
                 });
@@ -597,6 +663,36 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("Message");
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.Project", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.ProjectFile", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.UploadedFile", "File")
+                        .WithMany()
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ChatGPTClone.Api.Models.Project", "Project")
+                        .WithMany("Files")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("File");
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.RefreshToken", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
@@ -645,6 +741,13 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Navigation("Attachments");
 
                     b.Navigation("Sources");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.Project", b =>
+                {
+                    b.Navigation("Conversations");
+
+                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>

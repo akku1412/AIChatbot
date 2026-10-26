@@ -703,3 +703,98 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    ALTER TABLE [Conversations] ADD [ProjectId] int NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    CREATE TABLE [Projects] (
+        [ProjectId] int NOT NULL IDENTITY,
+        [UserId] int NOT NULL,
+        [Name] nvarchar(100) NOT NULL,
+        [Instructions] nvarchar(4000) NULL,
+        [CreatedAt] datetime2(3) NOT NULL,
+        [UpdatedAt] datetime2(3) NOT NULL,
+        CONSTRAINT [PK_Projects] PRIMARY KEY ([ProjectId]),
+        CONSTRAINT [FK_Projects_Users_UserId] FOREIGN KEY ([UserId]) REFERENCES [Users] ([UserId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    CREATE TABLE [ProjectFiles] (
+        [ProjectId] int NOT NULL,
+        [FileId] uniqueidentifier NOT NULL,
+        [CreatedAt] datetime2(3) NOT NULL,
+        CONSTRAINT [PK_ProjectFiles] PRIMARY KEY ([ProjectId], [FileId]),
+        CONSTRAINT [FK_ProjectFiles_Projects_ProjectId] FOREIGN KEY ([ProjectId]) REFERENCES [Projects] ([ProjectId]) ON DELETE CASCADE,
+        CONSTRAINT [FK_ProjectFiles_UploadedFiles_FileId] FOREIGN KEY ([FileId]) REFERENCES [UploadedFiles] ([FileId])
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    CREATE INDEX [IX_Conversations_ProjectId] ON [Conversations] ([ProjectId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    CREATE INDEX [IX_ProjectFiles_FileId] ON [ProjectFiles] ([FileId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    CREATE INDEX [IX_Projects_UserId_Name] ON [Projects] ([UserId], [Name]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    ALTER TABLE [Conversations] ADD CONSTRAINT [FK_Conversations_Projects_ProjectId] FOREIGN KEY ([ProjectId]) REFERENCES [Projects] ([ProjectId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026051439_Phase3Projects'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261026051439_Phase3Projects', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+

@@ -6,9 +6,10 @@ namespace ChatGPTClone.Api.Interfaces;
 /// <summary>Every read/write is scoped by userId, so an id from another user simply isn't found.</summary>
 public interface IConversationRepository
 {
-    /// <summary>The main list (pinned first, then most recent) or, with <paramref name="archived"/>, the archived chats.</summary>
+    /// <summary>The main list (pinned first, then most recent) or, with <paramref name="archived"/>, the archived chats.
+    /// Only chats in <paramref name="projectId"/> (null = chats in no project).</summary>
     Task<(List<Conversation> Items, int TotalCount)> ListAsync(int userId, int page, int pageSize, bool archived,
-        CancellationToken cancellationToken);
+        int? projectId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Conversations whose title or any message contains <paramref name="term"/> (case-insensitive LIKE), pinned first,

@@ -16,14 +16,14 @@ public sealed class ConversationsController(IConversationService conversations, 
 {
     /// <summary>
     /// Not archived: pinned first, then most recently active. With ?archived=true: only archived chats,
-    /// most recently archived first. Paginated.
+    /// most recently archived first. Without ?projectId: chats in no project; with it: that project's chats. Paginated.
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<ConversationDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<ConversationDto>>> List([FromQuery] ListConversationsQuery query,
         CancellationToken cancellationToken) =>
-        Ok(await conversations.ListAsync(User.GetUserId(), query.Page, query.PageSize, query.Archived, cancellationToken));
+        Ok(await conversations.ListAsync(User.GetUserId(), query.Page, query.PageSize, query.Archived, query.ProjectId, cancellationToken));
 
     /// <summary>
     /// Chats (archived ones included) whose title or message text contains q (2–100 characters, case-insensitive),
@@ -55,9 +55,16 @@ public sealed class ConversationsController(IConversationService conversations, 
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ConversationDto>> Create(CreateConversationRequest request, CancellationToken cancellationToken)
     {
-        var created = await conversations.CreateAsync(User.GetUserId(), request.Title, request.ModelId, cancellationToken);
+        var created = await conversations.CreateAsync(User.GetUserId(), request.Title, request.ModelId, request.ProjectId, cancellationToken);
         return CreatedAtAction(nameof(Get), new { id = created.ConversationId }, created);
     }
+
+    /// <summary>Moves the chat into one of your projects ({ "projectId": 3 }) or back to the main list ({ "projectId": null }).</summary>
+    [HttpPut("{id:int}/project")]
+    [ProducesResponseType(typeof(ConversationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ConversationDto>> Move(int id, MoveConversationRequest request, CancellationToken cancellationToken) =>
+        Ok(await conversations.MoveAsync(User.GetUserId(), id, request.ProjectId, cancellationToken));
 
     [HttpPut("{id:int}")]
     [ProducesResponseType(typeof(ConversationDto), StatusCodes.Status200OK)]
