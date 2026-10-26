@@ -4,6 +4,7 @@ using ChatGPTClone.Api.DTOs.Chat;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Models;
+using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Services.Files;
 using Microsoft.Extensions.Options;
 
@@ -79,6 +80,9 @@ public sealed record ChatTurn
     /// <summary>The message this turn supersedes on screen: the previous reply (regenerate) or the edited question.</summary>
     public long? PreviousVersionId { get; init; }
 
+    /// <summary>The allow-listed model that answers (the chat's pick, or the default).</summary>
+    public required AiModelOption Model { get; init; }
+
     public string Kind { get; init; } = "send";
 
     /// <summary>Document passages given to the AI (ChunkId → score); the ones the reply cites are saved as its sources.</summary>
@@ -89,7 +93,7 @@ public sealed class ChatService(
     IConversationService conversations,
     IConversationRepository conversationRepository,
     IMessageRepository messageRepository,
-    IAiChatProvider aiProvider,
+    IAiModelCatalog models,
     IFileService fileService,
     IDocumentContextBuilder documentContext,
     IFileStorage fileStorage,
@@ -183,7 +187,7 @@ public sealed class ChatService(
         var turn = await PrepareTurnAsync(userId, conversationId, content, attachmentIds, cancellationToken);
 
         // Ask the AI first: if it fails, nothing is saved, so the user can simply resend.
-        var completion = await CompleteAsync(turn.Prompt, _options.MaxOutputTokens, cancellationToken);
+        var completion = await CompleteAsync(turn.Model, turn.Prompt, _options.MaxOutputTokens, cancellationToken);
         var (userMessage, assistantMessage) = await PersistAsync(turn, completion.Content, completion.TotalTokens,
             stopped: false, completion.Truncated, cancellationToken);
 
@@ -299,6 +303,7 @@ public sealed class ChatService(
         return new ChatTurn
         {
             Conversation = conversation,
+            Model = models.Resolve(conversation.ModelId),
             Text = text,
             NewFiles = newFiles,
             Prompt = BuildPrompt(history, WithAttachmentNote(text, newFiles.Select(f => f.OriginalFileName)), documents?.Text, images),
@@ -336,7 +341,8 @@ public sealed class ChatService(
     public async IAsyncEnumerable<AiStreamUpdate> StreamReplyAsync(ChatTurn turn,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var updates = aiProvider.StreamAsync(turn.Prompt, _options.MaxOutputTokens, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        var provider = models.Provider(turn.Model.Id);
+        var updates = provider.StreamAsync(turn.Prompt, _options.MaxOutputTokens, cancellationToken).GetAsyncEnumerator(cancellationToken);
         try
         {
             while (true)
@@ -350,7 +356,7 @@ public sealed class ChatService(
                 }
                 catch (AiProviderException ex)
                 {
-                    logger.LogWarning("AI provider {Provider} failed while streaming: {Kind}", aiProvider.Name, ex.Kind);
+                    logger.LogWarning("AI provider {Provider} failed while streaming: {Kind}", provider.Name, ex.Kind);
                     throw ToApiException(ex.Kind);
                 }
                 yield return updates.Current;
@@ -436,6 +442,7 @@ public sealed class ChatService(
                 ParentMessageId = userMessage.MessageId,
                 VersionIndex = turn.ReplyVersionIndex,
                 IsTruncated = stopped,
+                ModelId = turn.Model.Id,
             };
             // Sources = cited passages that were really in this prompt (ids the AI invents are ignored).
             foreach (var chunkId in Citations.Ids(assistantMessage.Content).Where(turn.Passages.ContainsKey))
@@ -467,7 +474,7 @@ public sealed class ChatService(
 
         logger.LogInformation(
             "Conversation {ConversationId}: {Kind} reply from {Provider}, {Tokens} tokens, {Files} files in context{Truncated}{Stopped}",
-            conversationId, turn.Kind, aiProvider.Name, totalTokens, turn.ContextFileCount,
+            conversationId, turn.Kind, turn.Model.Id, totalTokens, turn.ContextFileCount,
             truncated ? " (truncated)" : "", stopped ? " (stopped by user)" : "");
 
         return (userMessage, assistantMessage);
@@ -519,15 +526,17 @@ public sealed class ChatService(
         return names.Count == 0 ? text : $"{text}\n\n[Attached: {string.Join(", ", names)}]";
     }
 
-    private async Task<AiCompletion> CompleteAsync(List<AiChatMessage> prompt, int maxTokens, CancellationToken cancellationToken)
+    private async Task<AiCompletion> CompleteAsync(AiModelOption model, List<AiChatMessage> prompt, int maxTokens,
+        CancellationToken cancellationToken)
     {
+        var provider = models.Provider(model.Id);
         try
         {
-            return await aiProvider.CompleteAsync(prompt, maxTokens, cancellationToken);
+            return await provider.CompleteAsync(prompt, maxTokens, cancellationToken);
         }
         catch (AiProviderException ex)
         {
-            logger.LogWarning("AI provider {Provider} failed: {Kind}", aiProvider.Name, ex.Kind);
+            logger.LogWarning("AI provider {Provider} failed: {Kind}", provider.Name, ex.Kind);
             throw ToApiException(ex.Kind);
         }
     }
@@ -537,7 +546,8 @@ public sealed class ChatService(
     {
         try
         {
-            var result = await aiProvider.CompleteAsync(
+            // Titles always use the default model: short, cheap, and independent of the chat's pick.
+            var result = await models.Provider(null).CompleteAsync(
             [
                 new AiChatMessage(MessageRole.System,
                     "Write a short title (3 to 6 words) for this conversation. Reply with the title only: " +

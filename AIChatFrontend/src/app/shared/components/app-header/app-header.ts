@@ -1,6 +1,9 @@
 import { Component, input, output } from '@angular/core';
 
-/** Top bar of the chat area. The menu and new-chat buttons only show on small screens; export shows for an open chat. */
+/**
+ * Top bar of the chat area. The menu and new-chat buttons only show on small screens; export shows for an open chat.
+ * Content marked [header-start] (the model picker) goes before the title.
+ */
 @Component({
   selector: 'app-header',
   template: `
@@ -8,6 +11,7 @@ import { Component, input, output } from '@angular/core';
       <button type="button" class="icon-button mobile" aria-label="Open sidebar" (click)="menu.emit()">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
+      <ng-content select="[header-start]" />
       <h1 class="title" [title]="title()">{{ title() }}</h1>
       @if (canExport()) {
         <button type="button" class="icon-button export" [disabled]="exporting()" aria-label="Export chat as TXT"

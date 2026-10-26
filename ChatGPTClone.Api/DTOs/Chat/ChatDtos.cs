@@ -3,11 +3,12 @@ using ChatGPTClone.Api.Models;
 
 namespace ChatGPTClone.Api.DTOs.Chat;
 
+/// <summary>ModelId: the chat's picked model (an id from GET /api/models); null = the default model.</summary>
 public sealed record ConversationDto(int ConversationId, string Title, DateTime CreatedAt, DateTime UpdatedAt,
-    bool IsPinned, DateTime? ArchivedAt)
+    bool IsPinned, DateTime? ArchivedAt, string? ModelId)
 {
     public static ConversationDto From(Conversation c) =>
-        new(c.ConversationId, c.Title, c.CreatedAt, c.UpdatedAt, c.IsPinned, c.ArchivedAt);
+        new(c.ConversationId, c.Title, c.CreatedAt, c.UpdatedAt, c.IsPinned, c.ArchivedAt, c.ModelId);
 }
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, bool HasMore);
@@ -88,12 +89,13 @@ public sealed class SearchConversationsQuery
     public int Limit { get; init; } = 20;
 }
 
-public sealed record CreateConversationRequest(string? Title);
+/// <summary>ModelId: an id from GET /api/models; omitted = the default model.</summary>
+public sealed record CreateConversationRequest(string? Title, string? ModelId = null);
 
 public sealed record RenameConversationRequest(string Title);
 
-/// <summary>Partial update: only the fields that are present change.</summary>
-public sealed record PatchConversationRequest(string? Title, bool? IsPinned, bool? Archived);
+/// <summary>Partial update: only the fields that are present change. ModelId must be an id from GET /api/models.</summary>
+public sealed record PatchConversationRequest(string? Title, bool? IsPinned, bool? Archived, string? ModelId = null);
 
 /// <summary>Content may be empty when files are attached (the AI is then asked to summarize them).</summary>
 public sealed record SendMessageRequest(string? Content, IReadOnlyList<Guid>? AttachmentIds);

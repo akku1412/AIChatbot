@@ -40,8 +40,9 @@ export class ChatApiService {
     return this.http.get<ConversationSummary>(`${this.conversationsUrl}/${conversationId}`);
   }
 
-  createConversation(title?: string): Observable<ConversationSummary> {
-    return this.http.post<ConversationSummary>(this.conversationsUrl, { title: title ?? null });
+  /** modelId: an id from GET /api/models (omitted = the default model). */
+  createConversation(title?: string, modelId?: string): Observable<ConversationSummary> {
+    return this.http.post<ConversationSummary>(this.conversationsUrl, { title: title ?? null, modelId: modelId ?? null });
   }
 
   renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {

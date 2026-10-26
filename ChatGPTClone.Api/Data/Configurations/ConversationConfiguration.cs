@@ -8,6 +8,9 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
 {
     public const int TitleMaxLength = 200;
 
+    /// <summary>Ai:Models ids are at most 32 characters (lower-case letters, digits, '-').</summary>
+    public const int ModelIdMaxLength = 32;
+
     public void Configure(EntityTypeBuilder<Conversation> builder)
     {
         builder.ToTable("Conversations");
@@ -18,6 +21,7 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
         builder.Property(c => c.UpdatedAt).HasColumnType("datetime2(3)");
         builder.Property(c => c.IsPinned).HasDefaultValue(false);
         builder.Property(c => c.ArchivedAt).HasColumnType("datetime2(3)");
+        builder.Property(c => c.ModelId).HasMaxLength(ModelIdMaxLength).IsUnicode(false);
 
         builder.HasOne(c => c.User)
             .WithMany(u => u.Conversations)

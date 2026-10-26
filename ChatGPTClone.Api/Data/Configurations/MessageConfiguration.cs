@@ -33,6 +33,7 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(m => m.VersionIndex).HasDefaultValue(1);
         builder.Property(m => m.IsActive).HasDefaultValue(true);
         builder.Property(m => m.IsTruncated).HasDefaultValue(false);
+        builder.Property(m => m.ModelId).HasMaxLength(ConversationConfiguration.ModelIdMaxLength).IsUnicode(false);
 
         // Self-reference for versions/branches. NO ACTION: SQL Server forbids a second cascade path
         // (deleting a conversation already cascades to every message).

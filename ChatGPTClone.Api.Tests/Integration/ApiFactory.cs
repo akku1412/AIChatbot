@@ -4,10 +4,12 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ChatGPTClone.Api.Authentication;
+using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services;
+using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Services.Embeddings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -52,6 +54,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Smtp:Password", "unused");
         builder.UseSetting("Smtp:FromEmail", "unused@example.test");
         builder.UseSetting("Ai:Provider", "OpenAI");
+        // Two models for the picker tests; the fake factory below serves both, recording which one answered.
+        builder.UseSetting("Ai:DefaultModel", "smart");
+        builder.UseSetting("Ai:Models:0:Id", "fast");
+        builder.UseSetting("Ai:Models:0:Label", "Fast");
+        builder.UseSetting("Ai:Models:0:Model", "fast-model-name");
+        builder.UseSetting("Ai:Models:1:Id", "smart");
+        builder.UseSetting("Ai:Models:1:Label", "Smart");
+        builder.UseSetting("Ai:Models:1:Model", "smart-model-name");
+        builder.UseSetting("Ai:Models:1:SupportsVision", "true");
         builder.UseSetting("RateLimits:GlobalPerMinute", "100000");
         builder.UseSetting("RateLimits:AuthPerMinute", "100000");
         builder.UseSetting("RateLimits:AiChatPerMinute", "100000");
@@ -64,7 +75,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         {
             services.AddSingleton<IGoogleTokenValidator, FakeGoogleTokenValidator>();
             services.AddSingleton<IEmailSender>(Email);
-            services.AddSingleton<IAiChatProvider>(Ai);
+            services.AddSingleton<IAiProviderFactory>(new FakeAiProviderFactory(Ai));
             // The real 118 MB model is exercised by RetrievalQualityTests only; everything else uses this fake.
             services.AddSingleton<IEmbeddingProvider>(Embeddings);
         });
@@ -135,10 +146,41 @@ public sealed partial class FakeEmailSender : IEmailSender
     private static partial Regex CodePattern();
 }
 
+/// <summary>Every configured model is served by the same fake, which records which model was asked.</summary>
+public sealed class FakeAiProviderFactory(FakeAiProvider fake) : IAiProviderFactory
+{
+    public IAiChatProvider Create(AiModelOption model) => new ForModel(fake, model.Id);
+
+    private sealed class ForModel(FakeAiProvider fake, string modelId) : IAiChatProvider
+    {
+        public string Name => $"Fake/{modelId}";
+
+        public Task<AiCompletion> CompleteAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
+            CancellationToken cancellationToken)
+        {
+            fake.CallingModelId = modelId;
+            return fake.CompleteAsync(messages, maxOutputTokens, cancellationToken);
+        }
+
+        public IAsyncEnumerable<AiStreamUpdate> StreamAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
+            CancellationToken cancellationToken)
+        {
+            fake.CallingModelId = modelId;
+            return fake.StreamAsync(messages, maxOutputTokens, cancellationToken);
+        }
+    }
+}
+
 /// <summary>Deterministic AI: echoes the last user message; can be switched to fail.</summary>
 public sealed class FakeAiProvider : IAiChatProvider
 {
     public string Name => "Fake";
+
+    /// <summary>Set by <see cref="FakeAiProviderFactory"/> before each call.</summary>
+    internal string? CallingModelId { get; set; }
+
+    /// <summary>The model that wrote the most recent answer (title prompts excluded).</summary>
+    public string? LastModelId { get; private set; }
     public AiFailureKind? FailWith { get; set; }
     public ConcurrentBag<IReadOnlyList<AiChatMessage>> Prompts { get; } = [];
 
@@ -160,6 +202,7 @@ public sealed class FakeAiProvider : IAiChatProvider
 
         Prompts.Add(messages);
         LastPrompt = messages; // the answer prompt, not the title prompt
+        LastModelId = CallingModelId;
         if (Reply is { } reply)
         {
             return Task.FromResult(new AiCompletion(reply(messages), 42, false));

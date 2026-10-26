@@ -36,7 +36,7 @@ public sealed class ConversationsController(IConversationService conversations, 
         CancellationToken cancellationToken) =>
         Ok(await conversations.SearchAsync(User.GetUserId(), query.Q, query.Limit, cancellationToken));
 
-    /// <summary>Partial update — any of { "title", "isPinned", "archived" }.</summary>
+    /// <summary>Partial update — any of { "title", "isPinned", "archived", "modelId" } (modelId from GET /api/models).</summary>
     [HttpPatch("{id:int}")]
     [ProducesResponseType(typeof(ConversationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
@@ -55,7 +55,7 @@ public sealed class ConversationsController(IConversationService conversations, 
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ConversationDto>> Create(CreateConversationRequest request, CancellationToken cancellationToken)
     {
-        var created = await conversations.CreateAsync(User.GetUserId(), request.Title, cancellationToken);
+        var created = await conversations.CreateAsync(User.GetUserId(), request.Title, request.ModelId, cancellationToken);
         return CreatedAtAction(nameof(Get), new { id = created.ConversationId }, created);
     }
 

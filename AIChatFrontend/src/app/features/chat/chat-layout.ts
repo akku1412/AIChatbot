@@ -11,13 +11,14 @@ import { ChatStore } from '../../core/services/chat.store';
 import { fileNameFromDisposition, safeFileName, saveBlob } from '../../core/services/download';
 import { AppHeader } from '../../shared/components/app-header/app-header';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
+import { ModelPicker } from '../../shared/components/model-picker/model-picker';
 import { ArchiveRequest, PinRequest, RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 
 /** Signed-in shell: sidebar (a drawer on small screens) + header + the routed page (chat or profile). */
 @Component({
   selector: 'app-chat-layout',
-  imports: [RouterOutlet, Sidebar, AppHeader],
+  imports: [RouterOutlet, Sidebar, AppHeader, ModelPicker],
   host: { '(document:keydown.escape)': 'closeDrawer()' },
   template: `
     <div class="layout" [class.drawer-open]="drawerOpen()">
@@ -62,7 +63,11 @@ import { NotificationService } from '../../shared/components/toast/notification.
           (menu)="drawerOpen.set(true)"
           (newChat)="newChat()"
           (export)="exportChat(store.activeConversationId()!)"
-        />
+        >
+          @if (onChat()) {
+            <app-model-picker header-start />
+          }
+        </app-header>
         <router-outlet />
       </section>
     </div>
@@ -92,6 +97,9 @@ export class ChatLayout {
   );
 
   /** Export needs a saved conversation with at least one message, and not while a reply is still arriving. */
+  /** The model picker belongs to chats, not to the profile page. */
+  protected readonly onChat = computed(() => !this.url().startsWith('/profile'));
+
   protected readonly canExport = computed(
     () =>
       !this.url().startsWith('/profile') &&

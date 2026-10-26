@@ -12,6 +12,7 @@ import {
   StreamTurnResult,
 } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
+import { ModelService } from './model.service';
 
 const PAGE_SIZE = 20;
 /** Streamed text is applied to the screen at most this often (smooth, and Markdown isn't re-rendered per token). */
@@ -36,6 +37,7 @@ interface TurnView {
 @Injectable({ providedIn: 'root' })
 export class ChatStore {
   private readonly api = inject(ChatApiService);
+  private readonly models = inject(ModelService);
 
   // ----- Conversation lists (sidebar) -----
   private readonly conversationList = signal<ConversationSummary[]>([]);
@@ -75,11 +77,38 @@ export class ChatStore {
     return id !== null && !this.messages().find((m) => m.messageId === id)?.content;
   });
 
-  readonly activeConversation = computed(
-    () =>
-      [...this.conversationList(), ...(this.archivedList() ?? [])].find((c) => c.conversationId === this.activeConversationId()) ??
-      null,
+  /** A chat opened directly (e.g. from search) that isn't in the loaded sidebar pages. */
+  private readonly openedConversation = signal<ConversationSummary | null>(null);
+
+  readonly activeConversation = computed(() => {
+    const id = this.activeConversationId();
+    return (
+      [...this.conversationList(), ...(this.archivedList() ?? [])].find((c) => c.conversationId === id) ??
+      (this.openedConversation()?.conversationId === id ? this.openedConversation() : null)
+    );
+  });
+
+  // ----- Model picker -----
+  /** The model picked for the next new chat (sent when the conversation is created). */
+  private readonly newChatModelId = signal<string | null>(null);
+
+  /** The model the open chat (or the new chat) will answer with; null until the model list is loaded. */
+  readonly activeModelId = computed(() =>
+    this.models.effectiveId(this.activeConversationId() ? this.activeConversation()?.modelId : this.newChatModelId()),
   );
+
+  /**
+   * Picks the model for the open chat (saved on the server, applies from the next reply) or for the new chat
+   * (saved when it is created). Emits once done.
+   */
+  selectModel(modelId: string): Observable<void> {
+    const conversationId = this.activeConversationId();
+    if (!conversationId) {
+      this.newChatModelId.set(modelId);
+      return of(undefined);
+    }
+    return this.patch(conversationId, { modelId }).pipe(map(() => undefined));
+  }
 
   private activeStream: { abort: (reload?: boolean) => void } | null = null;
   private nextTempId = -1;
@@ -178,6 +207,9 @@ export class ChatStore {
   /** Puts a changed conversation in the right list (main or archived), in the right place. */
   private upsert(conversation: ConversationSummary): void {
     const id = conversation.conversationId;
+    if (this.openedConversation()?.conversationId === id) {
+      this.openedConversation.set(conversation);
+    }
     if (conversation.archivedAt) {
       this.conversationList.update((list) => list.filter((c) => c.conversationId !== id));
       this.archivedList.update((list) => (list ? [conversation, ...list.filter((c) => c.conversationId !== id)] : list));
@@ -217,6 +249,14 @@ export class ChatStore {
     this.messages.set([]);
     this.messagesError.set(null);
     this.messagesLoading.set(true);
+
+    // Not in the loaded sidebar pages: fetch its details (title, model) for the header.
+    if (!this.activeConversation()) {
+      this.api.getConversation(conversationId).subscribe({
+        next: (conversation) => this.openedConversation.set(conversation),
+        error: () => undefined, // the messages request reports problems (e.g. 404)
+      });
+    }
 
     this.api
       .getMessages(conversationId)
@@ -270,7 +310,7 @@ export class ChatStore {
     let createdId: number | null = null;
     const conversationId$ = existingId
       ? of(existingId)
-      : this.api.createConversation().pipe(
+      : this.api.createConversation(undefined, this.newChatModelId() ?? undefined).pipe(
           tap((conversation) => {
             createdId = conversation.conversationId;
             this.conversationList.update((list) => sortConversations([conversation, ...list]));

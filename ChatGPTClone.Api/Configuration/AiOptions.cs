@@ -45,11 +45,51 @@ public sealed class AiOptions
     public OpenAiProviderOptions Groq { get; init; } = new();
 
     /// <summary>Settings of the provider named by <see cref="Provider"/>.</summary>
-    public OpenAiProviderOptions Active => Provider switch
+    public OpenAiProviderOptions Active => ProviderSettings(Provider);
+
+    public OpenAiProviderOptions ProviderSettings(string provider) => provider switch
     {
         "Groq" => Groq,
         _ => OpenAI,
     };
+
+    /// <summary>
+    /// The models users may pick per chat (allow-list). Empty = one model: <see cref="Provider"/> with its Model.
+    /// Clients only ever send an <see cref="AiModelOption.Id"/>; raw model names never come from the client.
+    /// </summary>
+    public List<AiModelOption> Models { get; init; } = [];
+
+    /// <summary>Id from <see cref="Models"/> for new chats and chats whose model was removed. Empty = the first one.</summary>
+    public string? DefaultModel { get; init; }
+}
+
+/// <summary>One entry of the model picker, e.g. "Fast" (small, cheap) or "Smart" (larger, slower).</summary>
+public sealed class AiModelOption
+{
+    /// <summary>Stable id stored on conversations and messages, e.g. "fast". Never rename a published id.</summary>
+    [Required, RegularExpression("^[a-z0-9][a-z0-9-]{0,31}$")]
+    public string Id { get; init; } = string.Empty;
+
+    [Required, StringLength(40)]
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>One line shown under the label in the picker.</summary>
+    [StringLength(120)]
+    public string? Description { get; init; }
+
+    /// <summary>"OpenAI" or "Groq": whose API key and endpoint to use.</summary>
+    [Required]
+    public string Provider { get; init; } = "OpenAI";
+
+    /// <summary>The provider's model name.</summary>
+    [Required]
+    public string Model { get; init; } = string.Empty;
+
+    /// <summary>For reasoning models ("low", "medium", "high").</summary>
+    public string? ReasoningEffort { get; init; }
+
+    /// <summary>The model itself accepts images; otherwise image questions go to the provider's VisionModel.</summary>
+    public bool SupportsVision { get; init; }
 }
 
 /// <summary>Settings for any OpenAI-compatible chat completions API.</summary>

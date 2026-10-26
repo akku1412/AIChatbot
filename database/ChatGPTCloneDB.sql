@@ -290,3 +290,383 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE TABLE [UploadedFiles] (
+        [FileId] uniqueidentifier NOT NULL,
+        [UserId] int NOT NULL,
+        [OriginalFileName] nvarchar(255) NOT NULL,
+        [StorageKey] varchar(100) NOT NULL,
+        [ContentType] varchar(150) NOT NULL,
+        [FileExtension] varchar(10) NOT NULL,
+        [FileSize] bigint NOT NULL,
+        [ProcessingStatus] varchar(20) NOT NULL,
+        [StatusMessage] nvarchar(500) NULL,
+        [PageCount] int NULL,
+        [ExtractedCharacters] int NOT NULL,
+        [CreatedAt] datetime2(3) NOT NULL,
+        [UpdatedAt] datetime2(3) NOT NULL,
+        CONSTRAINT [PK_UploadedFiles] PRIMARY KEY ([FileId]),
+        CONSTRAINT [CK_UploadedFiles_FileSize] CHECK ([FileSize] >= 0),
+        CONSTRAINT [CK_UploadedFiles_Status] CHECK ([ProcessingStatus] IN ('uploaded', 'processing', 'completed', 'failed')),
+        CONSTRAINT [FK_UploadedFiles_Users_UserId] FOREIGN KEY ([UserId]) REFERENCES [Users] ([UserId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE TABLE [DocumentChunks] (
+        [ChunkId] bigint NOT NULL IDENTITY,
+        [FileId] uniqueidentifier NOT NULL,
+        [ChunkIndex] int NOT NULL,
+        [Kind] varchar(20) NOT NULL,
+        [Location] nvarchar(300) NOT NULL,
+        [Content] nvarchar(max) NOT NULL,
+        CONSTRAINT [PK_DocumentChunks] PRIMARY KEY ([ChunkId]),
+        CONSTRAINT [FK_DocumentChunks_UploadedFiles_FileId] FOREIGN KEY ([FileId]) REFERENCES [UploadedFiles] ([FileId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE TABLE [MessageAttachments] (
+        [MessageAttachmentId] bigint NOT NULL IDENTITY,
+        [MessageId] bigint NOT NULL,
+        [FileId] uniqueidentifier NOT NULL,
+        CONSTRAINT [PK_MessageAttachments] PRIMARY KEY ([MessageAttachmentId]),
+        CONSTRAINT [FK_MessageAttachments_Messages_MessageId] FOREIGN KEY ([MessageId]) REFERENCES [Messages] ([MessageId]) ON DELETE CASCADE,
+        CONSTRAINT [FK_MessageAttachments_UploadedFiles_FileId] FOREIGN KEY ([FileId]) REFERENCES [UploadedFiles] ([FileId])
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_DocumentChunks_FileId_ChunkIndex] ON [DocumentChunks] ([FileId], [ChunkIndex]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE INDEX [IX_MessageAttachments_FileId] ON [MessageAttachments] ([FileId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_MessageAttachments_MessageId_FileId] ON [MessageAttachments] ([MessageId], [FileId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE INDEX [IX_UploadedFiles_UserId_CreatedAt] ON [UploadedFiles] ([UserId], [CreatedAt]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_UploadedFiles_StorageKey] ON [UploadedFiles] ([StorageKey]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261016053559_AddFileUploadsAndAttachments'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261016053559_AddFileUploadsAndAttachments', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Messages] ADD [IsActive] bit NOT NULL DEFAULT CAST(1 AS bit);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Messages] ADD [IsTruncated] bit NOT NULL DEFAULT CAST(0 AS bit);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Messages] ADD [ParentMessageId] bigint NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Messages] ADD [VersionIndex] int NOT NULL DEFAULT 1;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Conversations] ADD [ArchivedAt] datetime2(3) NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Conversations] ADD [IsPinned] bit NOT NULL DEFAULT CAST(0 AS bit);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    CREATE INDEX [IX_Messages_ConversationId_ParentMessageId] ON [Messages] ([ConversationId], [ParentMessageId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    CREATE INDEX [IX_Messages_ParentMessageId] ON [Messages] ([ParentMessageId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    CREATE INDEX [IX_Conversations_UserId_Archived_Pinned_UpdatedAt] ON [Conversations] ([UserId], [ArchivedAt], [IsPinned] DESC, [UpdatedAt] DESC);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+
+    UPDATE m SET m.ParentMessageId = p.PreviousId
+    FROM Messages AS m
+    JOIN (SELECT MessageId, LAG(MessageId) OVER (PARTITION BY ConversationId ORDER BY MessageId) AS PreviousId FROM Messages) AS p
+        ON p.MessageId = m.MessageId
+    WHERE m.ParentMessageId IS NULL AND p.PreviousId IS NOT NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    ALTER TABLE [Messages] ADD CONSTRAINT [FK_Messages_Messages_ParentMessageId] FOREIGN KEY ([ParentMessageId]) REFERENCES [Messages] ([MessageId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023054650_Phase1ChatExperience'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261023054650_Phase1ChatExperience', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    ALTER TABLE [UploadedFiles] ADD [ProgressCurrent] int NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    ALTER TABLE [UploadedFiles] ADD [ProgressTotal] int NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    ALTER TABLE [UploadedFiles] ADD [StatusReason] varchar(50) NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    ALTER TABLE [DocumentChunks] ADD [Source] varchar(10) NOT NULL DEFAULT 'text';
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    CREATE TABLE [ChunkEmbeddings] (
+        [ChunkId] bigint NOT NULL,
+        [Model] varchar(100) NOT NULL,
+        [Dimensions] int NOT NULL,
+        [Vector] varbinary(max) NOT NULL,
+        CONSTRAINT [PK_ChunkEmbeddings] PRIMARY KEY ([ChunkId]),
+        CONSTRAINT [CK_ChunkEmbeddings_Dimensions] CHECK ([Dimensions] > 0),
+        CONSTRAINT [FK_ChunkEmbeddings_DocumentChunks_ChunkId] FOREIGN KEY ([ChunkId]) REFERENCES [DocumentChunks] ([ChunkId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    CREATE TABLE [MessageSources] (
+        [MessageSourceId] bigint NOT NULL IDENTITY,
+        [MessageId] bigint NOT NULL,
+        [ChunkId] bigint NOT NULL,
+        [Score] float NOT NULL,
+        CONSTRAINT [PK_MessageSources] PRIMARY KEY ([MessageSourceId]),
+        CONSTRAINT [FK_MessageSources_DocumentChunks_ChunkId] FOREIGN KEY ([ChunkId]) REFERENCES [DocumentChunks] ([ChunkId]),
+        CONSTRAINT [FK_MessageSources_Messages_MessageId] FOREIGN KEY ([MessageId]) REFERENCES [Messages] ([MessageId]) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    CREATE INDEX [IX_MessageSources_ChunkId] ON [MessageSources] ([ChunkId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    CREATE UNIQUE INDEX [UX_MessageSources_MessageId_ChunkId] ON [MessageSources] ([MessageId], [ChunkId]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261023105028_Phase2DocumentIntelligence'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261023105028_Phase2DocumentIntelligence', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026045429_Phase3ModelPicker'
+)
+BEGIN
+    ALTER TABLE [Messages] ADD [ModelId] varchar(32) NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026045429_Phase3ModelPicker'
+)
+BEGIN
+    ALTER TABLE [Conversations] ADD [ModelId] varchar(32) NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261026045429_Phase3ModelPicker'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261026045429_Phase3ModelPicker', N'8.0.31');
+END;
+GO
+
+COMMIT;
+GO
+

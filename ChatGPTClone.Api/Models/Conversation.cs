@@ -19,6 +19,9 @@ public class Conversation : IAuditable
     /// <summary>When the chat was archived (hidden from the main list); null = not archived.</summary>
     public DateTime? ArchivedAt { get; set; }
 
+    /// <summary>The model picked for this chat (an Ai:Models id); null = the default model.</summary>
+    public string? ModelId { get; set; }
+
     public User User { get; set; } = null!;
     public ICollection<Message> Messages { get; set; } = new List<Message>();
 }

@@ -8,6 +8,8 @@ export interface ConversationSummary {
   isPinned: boolean;
   /** Set when the chat is archived (hidden from the main list). */
   archivedAt: string | null;
+  /** The model picked for this chat (an id from GET /api/models); null = the default model. */
+  modelId?: string | null;
 }
 
 /** PATCH /api/conversations/{id}: only the fields present change. */
@@ -15,6 +17,21 @@ export interface ConversationPatch {
   title?: string;
   isPinned?: boolean;
   archived?: boolean;
+  /** An id from GET /api/models. */
+  modelId?: string;
+}
+
+/** A model the user can pick per chat (GET /api/models). Ids and labels only; the server maps them to real models. */
+export interface AiModel {
+  id: string;
+  label: string;
+  description: string | null;
+  supportsVision: boolean;
+}
+
+export interface AiModels {
+  models: AiModel[];
+  defaultModelId: string;
 }
 
 /** GET /api/conversations/search?q= */

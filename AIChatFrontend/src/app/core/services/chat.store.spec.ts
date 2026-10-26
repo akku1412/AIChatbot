@@ -1,9 +1,11 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Observable, Subject, of, throwError } from 'rxjs';
 
 import { ChatMessage, ChatStreamEvent, ConversationSummary, StreamTurnResult } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
 import { ChatStore, STREAM_RENDER_INTERVAL_MS, sortConversations } from './chat.store';
+import { ModelService } from './model.service';
 
 describe('ChatStore', () => {
   let store: ChatStore;
@@ -38,7 +40,18 @@ describe('ChatStore', () => {
     for (const fn of [api.streamMessage, api.regenerateMessage, api.editMessage]) {
       fn.mockReturnValue(stream.asObservable());
     }
-    TestBed.configureTestingModule({ providers: [{ provide: ChatApiService, useValue: api }] });
+    // The real fallback logic over a fixed list (no HTTP).
+    const models = {
+      models: signal([
+        { id: 'fast', label: 'Fast', description: null, supportsVision: false },
+        { id: 'smart', label: 'Smart', description: null, supportsVision: true },
+      ]),
+      defaultModelId: signal<string | null>('smart'),
+      effectiveId: ModelService.prototype.effectiveId,
+    };
+    TestBed.configureTestingModule({
+      providers: [{ provide: ChatApiService, useValue: api }, { provide: ModelService, useValue: models }],
+    });
     store = TestBed.inject(ChatStore);
     store.activeConversationId.set(7);
   });
@@ -46,6 +59,37 @@ describe('ChatStore', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  describe('model picker', () => {
+    it('a new chat remembers the pick and creates the conversation with it', () => {
+      store.startNewChat();
+      expect(store.activeModelId()).toBe('smart'); // the server default
+
+      store.selectModel('fast').subscribe();
+      expect(api.patchConversation).not.toHaveBeenCalled();
+      expect(store.activeModelId()).toBe('fast');
+
+      api.createConversation.mockReturnValue(of(conv(9, { modelId: 'fast' })));
+      store.send('hi').subscribe();
+      expect(api.createConversation).toHaveBeenCalledWith(undefined, 'fast');
+      expect(store.activeModelId()).toBe('fast');
+    });
+
+    it('an open chat saves the pick on the server', () => {
+      api.patchConversation.mockReturnValue(of(conv(7, { modelId: 'fast' })));
+
+      store.selectModel('fast').subscribe();
+
+      expect(api.patchConversation).toHaveBeenCalledWith(7, { modelId: 'fast' });
+      expect(store.activeModelId()).toBe('fast');
+    });
+
+    it("shows the default for a chat whose model the server doesn't offer any more", () => {
+      api.patchConversation.mockReturnValue(of(conv(7, { modelId: 'retired' })));
+      store.selectModel('retired').subscribe();
+      expect(store.activeModelId()).toBe('smart');
+    });
   });
 
   it('streams the reply with deltas batched every 50 ms, then swaps in the saved messages', () => {

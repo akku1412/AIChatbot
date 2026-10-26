@@ -2,7 +2,9 @@ using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data.Configurations;
 using Microsoft.Extensions.Options;
 using ChatGPTClone.Api.DTOs.Chat;
+using ChatGPTClone.Api.Services.Ai;
 using FluentValidation;
+using static ChatGPTClone.Api.Validators.ChatLimits;
 
 namespace ChatGPTClone.Api.Validators;
 
@@ -10,6 +12,8 @@ public static class ChatLimits
 {
     /// <summary>Must match MAX_MESSAGE_LENGTH in the Angular app.</summary>
     public const int MaxMessageLength = 8000;
+
+    public const string UnknownModel = "This model isn't available. Choose one from GET /api/models.";
 }
 
 public sealed class ListConversationsQueryValidator : AbstractValidator<ListConversationsQuery>
@@ -34,11 +38,12 @@ public sealed class SearchConversationsQueryValidator : AbstractValidator<Search
 
 public sealed class PatchConversationRequestValidator : AbstractValidator<PatchConversationRequest>
 {
-    public PatchConversationRequestValidator()
+    public PatchConversationRequestValidator(IAiModelCatalog models)
     {
         RuleFor(r => r)
-            .Must(r => r.Title is not null || r.IsPinned is not null || r.Archived is not null)
-            .WithName("request").WithMessage("Nothing to change: send title, isPinned or archived.");
+            .Must(r => r.Title is not null || r.IsPinned is not null || r.Archived is not null || r.ModelId is not null)
+            .WithName("request").WithMessage("Nothing to change: send title, isPinned, archived or modelId.");
+        RuleFor(r => r.ModelId).Must(models.IsAllowed).WithMessage(UnknownModel).When(r => r.ModelId is not null);
         RuleFor(r => r.Title!)
             .Must(t => !string.IsNullOrWhiteSpace(t)).WithMessage("Title cannot be empty.")
             .MaximumLength(ConversationConfiguration.TitleMaxLength)
@@ -77,9 +82,10 @@ public sealed class MessagesQueryValidator : AbstractValidator<MessagesQuery>
 
 public sealed class CreateConversationRequestValidator : AbstractValidator<CreateConversationRequest>
 {
-    public CreateConversationRequestValidator()
+    public CreateConversationRequestValidator(IAiModelCatalog models)
     {
         RuleFor(r => r.Title).MaximumLength(ConversationConfiguration.TitleMaxLength);
+        RuleFor(r => r.ModelId).Must(models.IsAllowed).WithMessage(UnknownModel).When(r => r.ModelId is not null);
     }
 }
 

@@ -11,7 +11,8 @@ public interface IConversationService
     /// <summary>The main list (pinned first) or, with <paramref name="archived"/>, the archived chats.</summary>
     Task<PagedResult<ConversationDto>> ListAsync(int userId, int page, int pageSize, bool archived, CancellationToken cancellationToken);
     Task<ConversationDto> GetAsync(int userId, int conversationId, CancellationToken cancellationToken);
-    Task<ConversationDto> CreateAsync(int userId, string? title, CancellationToken cancellationToken);
+    /// <param name="modelId">An allow-listed model id (checked by the request validator); null = default.</param>
+    Task<ConversationDto> CreateAsync(int userId, string? title, string? modelId, CancellationToken cancellationToken);
     Task<ConversationDto> RenameAsync(int userId, int conversationId, string title, CancellationToken cancellationToken);
 
     /// <summary>Changes only the fields that are set: title, pinned, archived.</summary>
@@ -41,12 +42,13 @@ public sealed partial class ConversationService(IConversationRepository reposito
     public async Task<ConversationDto> GetAsync(int userId, int conversationId, CancellationToken cancellationToken) =>
         ConversationDto.From(await GetOwnedOrThrowAsync(userId, conversationId, cancellationToken));
 
-    public async Task<ConversationDto> CreateAsync(int userId, string? title, CancellationToken cancellationToken)
+    public async Task<ConversationDto> CreateAsync(int userId, string? title, string? modelId, CancellationToken cancellationToken)
     {
         var conversation = new Conversation
         {
             UserId = userId,
             Title = string.IsNullOrWhiteSpace(title) ? DefaultTitle : title.Trim(),
+            ModelId = modelId,
         };
         repository.Add(conversation);
         await repository.SaveChangesAsync(cancellationToken);
@@ -79,7 +81,11 @@ public sealed partial class ConversationService(IConversationRepository reposito
             // Keep the original archive time when "archived" is sent again.
             conversation.ArchivedAt = archived ? conversation.ArchivedAt ?? DateTime.UtcNow : null;
         }
-        // Pinning/archiving is not "activity": UpdatedAt (sidebar order) is left unchanged.
+        if (request.ModelId is { } modelId)
+        {
+            conversation.ModelId = modelId; // allow-listed by the request validator; applies from the next reply
+        }
+        // Pinning/archiving/switching model is not "activity": UpdatedAt (sidebar order) is left unchanged.
         await repository.SaveChangesAsync(cancellationToken);
         return ConversationDto.From(conversation);
     }

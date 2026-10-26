@@ -160,14 +160,11 @@ builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IDocumentContextBuilder, DocumentContextBuilder>();
 builder.Services.AddScoped<UploadSizeLimitFilter>();
 
-// AI provider is chosen by configuration ("Ai:Provider": OpenAI or Groq). Both speak the OpenAI API;
-// a vendor with a different API only needs another IAiChatProvider implementation here.
-builder.Services.AddSingleton<IAiChatProvider>(sp =>
-{
-    var ai = sp.GetRequiredService<IOptions<AiOptions>>().Value;
-    return new OpenAiChatProvider(ai.Provider, ai.Active, ai.TimeoutSeconds,
-        sp.GetRequiredService<ILogger<OpenAiChatProvider>>());
-});
+// Chat models come from the "Ai:Models" allow-list (the per-chat model picker); without it, "Ai:Provider"
+// (OpenAI or Groq) and its Model are the only model. Both speak the OpenAI API; a vendor with a different API
+// only needs another IAiChatProvider implementation and a factory here.
+builder.Services.AddSingleton<IAiProviderFactory, OpenAiProviderFactory>();
+builder.Services.AddSingleton<IAiModelCatalog, AiModelCatalog>();
 
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
@@ -255,6 +252,9 @@ builder.Services.AddSwaggerGen(o =>
 });
 
 var app = builder.Build();
+
+// A wrong Ai:Models / Ai:DefaultModel should stop startup, not fail a user's first message.
+app.Services.GetRequiredService<IAiModelCatalog>();
 
 // ---------- HTTP pipeline (order matters) ----------
 app.UseExceptionHandler();

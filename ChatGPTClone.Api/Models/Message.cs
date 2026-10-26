@@ -38,6 +38,9 @@ public class Message : IHasCreatedAt
     /// <summary>The reply was stopped by the user before it finished; Content holds the part that was generated.</summary>
     public bool IsTruncated { get; set; }
 
+    /// <summary>AI replies: the Ai:Models id that wrote it (for usage and cost reports). Null for user messages.</summary>
+    public string? ModelId { get; set; }
+
     public Message? ParentMessage { get; set; }
 
     public Conversation Conversation { get; set; } = null!;
