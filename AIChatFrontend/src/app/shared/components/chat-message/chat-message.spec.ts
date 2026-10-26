@@ -172,6 +172,43 @@ describe('ChatMessageView', () => {
     expect((el.querySelector('button[aria-label="Previous version"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  describe('image attachments', () => {
+    const withImage: ChatMessage = {
+      ...question,
+      attachments: [{ fileId: 'img-1', fileName: 'chart.png', fileExtension: '.png', fileSize: 2048, isImage: true }],
+    };
+
+    it('shows a thumbnail fetched once through the authenticated download, and opens it full size', async () => {
+      const el = await render(withImage);
+      expect(el.querySelector('app-attachment-chip')).toBeNull(); // images are thumbnails, not chips
+      http.expectOne((r) => r.url.endsWith('/files/img-1/download')).flush(new Blob(['png bytes']));
+      fixture.detectChanges();
+      expect(el.querySelector('.image-file img')?.getAttribute('src')).toBe('blob:test');
+
+      (el.querySelector('.image-file') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      const viewer = el.querySelector('[role="dialog"]') as HTMLElement;
+      expect(viewer.getAttribute('aria-label')).toBe('chart.png');
+      expect(viewer.querySelector('img')?.getAttribute('src')).toBe('blob:test');
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      fixture.detectChanges();
+      expect(el.querySelector('[role="dialog"]')).toBeNull();
+
+      await render(withImage); // the same image elsewhere reuses the cached copy
+      http.expectNone((r) => r.url.endsWith('/files/img-1/download'));
+    });
+
+    it('keeps a placeholder when the image cannot be loaded', async () => {
+      const el = await render({ ...withImage, attachments: [{ ...withImage.attachments[0], fileId: 'img-gone' }] });
+      http.expectOne((r) => r.url.endsWith('/files/img-gone/download')).flush(new Blob(['']), { status: 404, statusText: 'Not Found' });
+      fixture.detectChanges();
+      expect(el.querySelector('.image-file img')).toBeNull();
+      expect(el.querySelector('.image-loading')).not.toBeNull();
+      expect(errors).toEqual([]); // a missing thumbnail is not worth a toast
+    });
+  });
+
   it('marks a stopped reply with "(stopped)"', async () => {
     expect((await render({ ...reply, isTruncated: true })).querySelector('.stopped')?.textContent).toBe('(stopped)');
     expect((await render(reply)).querySelector('.stopped')).toBeNull();

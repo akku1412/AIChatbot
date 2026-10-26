@@ -17,6 +17,7 @@ import { Subscription } from 'rxjs';
 import { errorMessage } from '../../../core/http/api-error';
 import { AttachmentInfo, MAX_MESSAGE_LENGTH, UploadedFile } from '../../../core/models/chat.models';
 import { FileApiService, isProcessing, processingLabel } from '../../../core/services/file-api.service';
+import { ImagePreviewService, createObjectUrl, revokeObjectUrl } from '../../../core/services/image-preview.service';
 import { AttachmentChip, ChipState, formatFileSize } from '../attachment-chip/attachment-chip';
 import { NotificationService } from '../toast/notification.service';
 
@@ -34,6 +35,8 @@ interface PendingAttachment {
   error: string | null;
   /** While the server reads the file: its current step, e.g. "Reading scanned pages… 3/12". */
   detail: string | null;
+  /** Images: a blob URL of the local file for the thumbnail (owned by ImagePreviewService once uploaded). */
+  previewUrl: string | null;
   uploaded: UploadedFile | null;
   subscription: Subscription | null;
 }
@@ -59,6 +62,7 @@ interface PendingAttachment {
 })
 export class MessageInput {
   private readonly fileApi = inject(FileApiService);
+  private readonly previews = inject(ImagePreviewService);
   private readonly notifications = inject(NotificationService);
 
   /** Two-way bound draft text, so the parent can restore it after a failed send. */
@@ -109,8 +113,15 @@ export class MessageInput {
       queueMicrotask(() => this.autosize());
     });
 
-    // Leaving the page cancels uploads still in flight.
-    inject(DestroyRef).onDestroy(() => this.attachments().forEach((a) => a.subscription?.unsubscribe()));
+    // Leaving the page cancels uploads still in flight and frees thumbnails nobody else owns.
+    inject(DestroyRef).onDestroy(() =>
+      this.attachments().forEach((a) => {
+        a.subscription?.unsubscribe();
+        if (!a.uploaded || a.state !== 'ready') {
+          revokeObjectUrl(a.previewUrl);
+        }
+      }),
+    );
   }
 
   focus(): void {
@@ -170,7 +181,9 @@ export class MessageInput {
     if (attachment.uploaded) {
       // Uploaded but never sent: don't leave an orphan on the server.
       this.fileApi.delete(attachment.uploaded.fileId).subscribe({ error: () => undefined });
+      this.previews.forget(attachment.uploaded.fileId);
     }
+    revokeObjectUrl(attachment.previewUrl);
     this.attachments.update((list) => list.filter((a) => a.id !== id));
   }
 
@@ -196,12 +209,13 @@ export class MessageInput {
         fileName: f.fileName,
         fileExtension: f.fileExtension,
         fileSize: f.fileSize,
+        isImage: f.isImage ?? false,
       })),
     });
   }
 
   private addFiles(files: File[]): void {
-    const { maxFileSizeBytes, maxFilesPerMessage, allowedExtensions } = this.limits();
+    const { maxFileSizeBytes, maxFilesPerMessage, allowedExtensions, maxImageSizeBytes, imageExtensions } = this.limits();
     const room = maxFilesPerMessage - this.attachments().filter((a) => a.state !== 'error').length;
 
     if (files.length > room) {
@@ -212,26 +226,31 @@ export class MessageInput {
     for (const file of files) {
       const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
       if (!allowedExtensions.includes(extension)) {
-        this.notifications.error(`"${file.name}" isn't supported. Attach PDF, Word (.docx), Excel (.xlsx, .xls) or text (.txt) files.`);
+        this.notifications.error(`"${file.name}" isn't supported. Attach PDF, Word (.docx), Excel (.xlsx, .xls), text (.txt) or image (PNG, JPG, WebP) files.`);
         continue;
       }
       if (file.size === 0) {
         this.notifications.error(`"${file.name}" is empty.`);
         continue;
       }
-      if (file.size > maxFileSizeBytes) {
-        this.notifications.error(`"${file.name}" is ${formatFileSize(file.size)}; the limit is ${formatFileSize(maxFileSizeBytes)}.`);
+      const isImage = imageExtensions.includes(extension);
+      const limit = isImage ? maxImageSizeBytes : maxFileSizeBytes;
+      if (file.size > limit) {
+        this.notifications.error(
+          `"${file.name}" is ${formatFileSize(file.size)}; the limit${isImage ? ' for images' : ''} is ${formatFileSize(limit)}.`,
+        );
         continue;
       }
-      this.startUpload(file);
+      this.startUpload(file, isImage);
     }
   }
 
-  private startUpload(file: File): void {
+  private startUpload(file: File, isImage: boolean): void {
     const id = this.nextId++;
+    const previewUrl = isImage ? createObjectUrl(file) : null;
     this.attachments.update((list) => [
       ...list,
-      { id, file, state: 'uploading', progress: 0, error: null, detail: null, uploaded: null, subscription: null },
+      { id, file, state: 'uploading', progress: 0, error: null, detail: null, previewUrl, uploaded: null, subscription: null },
     ]);
 
     const subscription = this.fileApi.upload(file).subscribe({
@@ -269,6 +288,11 @@ export class MessageInput {
   }
 
   private finish(id: number, file: UploadedFile): void {
+    const previewUrl = this.attachments().find((a) => a.id === id)?.previewUrl;
+    if (file.status === 'completed' && previewUrl) {
+      // The sent message shows the same thumbnail without downloading the image again.
+      this.previews.adopt(file.fileId, previewUrl);
+    }
     this.patch(id, file.status === 'completed'
       ? { state: 'ready', uploaded: file, detail: null, subscription: null }
       : { state: 'error', error: file.statusMessage ?? 'This file could not be read.', detail: null, subscription: null });

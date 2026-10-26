@@ -46,6 +46,8 @@ export interface AttachmentInfo {
   fileName: string;
   fileExtension: string;
   fileSize: number;
+  /** PNG/JPEG/WebP: shown as a thumbnail and sent to the vision model. */
+  isImage?: boolean;
 }
 
 export interface ChatMessage {
@@ -95,13 +97,18 @@ export interface UploadLimits {
   maxFileSizeBytes: number;
   maxFilesPerMessage: number;
   allowedExtensions: string[];
+  /** Images have their own, smaller size limit. */
+  maxImageSizeBytes: number;
+  imageExtensions: string[];
 }
 
 /** Used until /api/files/limits answers; the server enforces the real values anyway. */
 export const DEFAULT_UPLOAD_LIMITS: UploadLimits = {
   maxFileSizeBytes: 20 * 1024 * 1024,
   maxFilesPerMessage: 5,
-  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls', '.txt'],
+  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls', '.txt', '.png', '.jpg', '.jpeg', '.webp'],
+  maxImageSizeBytes: 10 * 1024 * 1024,
+  imageExtensions: ['.png', '.jpg', '.jpeg', '.webp'],
 };
 
 export interface MessagePage {

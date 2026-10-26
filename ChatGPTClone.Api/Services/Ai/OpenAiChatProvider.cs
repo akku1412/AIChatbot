@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using System.Runtime.CompilerServices;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Interfaces;
@@ -22,8 +23,9 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     private readonly ChatReasoningEffortLevel? _reasoningEffort;
     private readonly ILogger<OpenAiChatProvider> _logger;
 
+    /// <param name="transport">Tests only: replaces the HTTP pipeline (e.g. a fake handler).</param>
     public OpenAiChatProvider(string name, OpenAiProviderOptions settings, int timeoutSeconds,
-        ILogger<OpenAiChatProvider> logger)
+        ILogger<OpenAiChatProvider> logger, PipelineTransport? transport = null)
     {
         Name = name;
         _logger = logger;
@@ -41,6 +43,10 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         {
             clientOptions.Endpoint = new Uri(settings.Endpoint);
         }
+        if (transport is not null)
+        {
+            clientOptions.Transport = transport;
+        }
 
         _client = new ChatClient(settings.Model, new ApiKeyCredential(settings.ApiKey), clientOptions);
         if (!string.IsNullOrWhiteSpace(settings.VisionModel))
@@ -57,27 +63,35 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     public async Task<AiCompletion> CompleteAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
         CancellationToken cancellationToken)
     {
-        var (client, chatMessages, effort) = Prepare(messages);
+        var request = Prepare(messages, allowImages: true);
 
         ChatCompletion completion;
-        try
+        while (true)
         {
-            completion = await client.CompleteChatAsync(
-                chatMessages,
-                new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = effort },
-                cancellationToken);
-        }
-        catch (ClientResultException ex)
-        {
-            throw Translate(ex);
-        }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new AiProviderException(AiFailureKind.Timeout, $"{Name} did not respond in time.", ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new AiProviderException(AiFailureKind.Unavailable, $"Could not reach {Name}.", ex);
+            try
+            {
+                completion = await request.Client.CompleteChatAsync(
+                    request.Messages,
+                    new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = request.Effort },
+                    cancellationToken);
+                break;
+            }
+            catch (ClientResultException ex) when (request.WithImages && IsImageRejection(ex))
+            {
+                request = WithoutImages(messages, ex);
+            }
+            catch (ClientResultException ex)
+            {
+                throw Translate(ex);
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new AiProviderException(AiFailureKind.Timeout, $"{Name} did not respond in time.", ex);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new AiProviderException(AiFailureKind.Unavailable, $"Could not reach {Name}.", ex);
+            }
         }
 
         if (completion.FinishReason == ChatFinishReason.ContentFilter)
@@ -102,10 +116,13 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     public async IAsyncEnumerable<AiStreamUpdate> StreamAsync(IReadOnlyList<AiChatMessage> messages, int maxOutputTokens,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var (client, chatMessages, effort) = Prepare(messages);
-        var options = new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = effort };
-        var updates = client.CompleteChatStreamingAsync(chatMessages, options, cancellationToken)
+        var request = Prepare(messages, allowImages: true);
+        IAsyncEnumerator<StreamingChatCompletionUpdate> Start(Request r) => r.Client
+            .CompleteChatStreamingAsync(r.Messages,
+                new ChatCompletionOptions { MaxOutputTokenCount = maxOutputTokens, ReasoningEffortLevel = r.Effort },
+                cancellationToken)
             .GetAsyncEnumerator(cancellationToken);
+        var updates = Start(request);
 
         int? totalTokens = null;
         var truncated = false;
@@ -122,6 +139,14 @@ public sealed class OpenAiChatProvider : IAiChatProvider
                         break;
                     }
                     update = updates.Current;
+                }
+                catch (ClientResultException ex) when (!anyText && request.WithImages && IsImageRejection(ex))
+                {
+                    // Nothing was shown yet, so the user never sees the failed attempt.
+                    await updates.DisposeAsync();
+                    request = WithoutImages(messages, ex);
+                    updates = Start(request);
+                    continue;
                 }
                 catch (ClientResultException ex)
                 {
@@ -166,24 +191,44 @@ public sealed class OpenAiChatProvider : IAiChatProvider
     private ChatClient RequireClient() =>
         _client ?? throw new AiProviderException(AiFailureKind.NotConfigured, $"{Name} API key is not configured.");
 
+    private sealed record Request(ChatClient Client, List<ChatMessage> Messages, ChatReasoningEffortLevel? Effort, bool WithImages);
+
     /// <summary>
     /// Prompts with images go to the vision model (without reasoning_effort, which vision models may reject).
     /// Without a vision model the images are left out; the AI still has the text read from them (OCR).
     /// </summary>
-    private (ChatClient Client, List<ChatMessage> Messages, ChatReasoningEffortLevel? Effort) Prepare(IReadOnlyList<AiChatMessage> messages)
+    private Request Prepare(IReadOnlyList<AiChatMessage> messages, bool allowImages)
     {
         var client = RequireClient();
         var hasImages = messages.Any(m => m.Images is { Count: > 0 });
-        if (hasImages && _visionClient is not null)
+        if (hasImages && allowImages && _visionClient is not null)
         {
-            return (_visionClient, ToChatMessages(messages, withImages: true), null);
+            return new Request(_visionClient, ToChatMessages(messages, withImages: true), null, WithImages: true);
         }
-        if (hasImages)
+        if (hasImages && allowImages)
         {
             _logger.LogInformation("{Provider} has no vision model configured; sending the prompt without images", Name);
         }
-        return (client, ToChatMessages(messages, withImages: false), _reasoningEffort);
+        return new Request(client, ToChatMessages(messages, withImages: false), _reasoningEffort, WithImages: false);
     }
+
+    /// <summary>The vision model refused the request: answer from the images' extracted text with the main model instead.</summary>
+    private Request WithoutImages(IReadOnlyList<AiChatMessage> messages, ClientResultException ex)
+    {
+        _logger.LogWarning("{Provider} vision model rejected the request (HTTP {Status}); retrying without images", Name, ex.Status);
+        return Prepare(messages, allowImages: false);
+    }
+
+    /// <summary>
+    /// A 4xx that isn't about auth, limits, context length or content policy: the vision model doesn't accept this
+    /// image (format, size) or isn't available on the plan. Retrying without the images can still answer.
+    /// </summary>
+    internal static bool IsImageRejection(ClientResultException ex) =>
+        ex.Status is 400 or 404 or 415 or 422 && Classify(ex) == AiFailureKind.Unavailable;
+
+    /// <summary>Added to a user message whose images are not sent, so the model doesn't claim to see them.</summary>
+    internal const string ImagesNotVisibleNote =
+        "[The attached image(s) could not be shown to you. Use only the text read from them, if provided, and say that you could not view the images themselves.]";
 
     internal static List<ChatMessage> ToChatMessages(IReadOnlyList<AiChatMessage> messages, bool withImages) =>
         messages.Select<AiChatMessage, ChatMessage>(m => m.Role switch
@@ -195,13 +240,20 @@ public sealed class OpenAiChatProvider : IAiChatProvider
                 ChatMessageContentPart.CreateTextPart(m.Content),
                 .. images.Select(i => ChatMessageContentPart.CreateImagePart(BinaryData.FromBytes(i.Data), i.ContentType)),
             ]),
+            _ when m.Images is { Count: > 0 } => new UserChatMessage($"{m.Content}\n\n{ImagesNotVisibleNote}"),
             _ => new UserChatMessage(m.Content),
         }).ToList();
 
     private AiProviderException Translate(ClientResultException ex)
     {
+        var kind = Classify(ex);
         // The exception message can echo request details; log only status and kind.
-        var kind = ex.Status switch
+        _logger.LogWarning("{Provider} request failed with HTTP {Status} ({Kind})", Name, ex.Status, kind);
+        return new AiProviderException(kind, $"{Name} request failed with HTTP {ex.Status}.", ex);
+    }
+
+    private static AiFailureKind Classify(ClientResultException ex) =>
+        ex.Status switch
         {
             401 or 403 => AiFailureKind.InvalidCredentials,
             413 => AiFailureKind.ContextTooLong,
@@ -214,7 +266,4 @@ public sealed class OpenAiChatProvider : IAiChatProvider
                   && ex.Message.Contains("policy", StringComparison.OrdinalIgnoreCase) => AiFailureKind.ContentRejected,
             _ => AiFailureKind.Unavailable,
         };
-        _logger.LogWarning("{Provider} request failed with HTTP {Status} ({Kind})", Name, ex.Status, kind);
-        return new AiProviderException(kind, $"{Name} request failed with HTTP {ex.Status}.", ex);
-    }
 }

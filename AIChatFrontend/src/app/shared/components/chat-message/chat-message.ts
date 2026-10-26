@@ -6,6 +6,7 @@ import { AttachmentInfo, ChatMessage, ExportFormat, MAX_MESSAGE_LENGTH } from '.
 import { ChatApiService } from '../../../core/services/chat-api.service';
 import { safeFileName, saveResponse } from '../../../core/services/download';
 import { FileApiService } from '../../../core/services/file-api.service';
+import { ImagePreviewService } from '../../../core/services/image-preview.service';
 import { AppLogo } from '../app-logo/app-logo';
 import { AttachmentChip } from '../attachment-chip/attachment-chip';
 import { MarkdownView } from '../markdown/markdown';
@@ -28,7 +29,7 @@ interface ExportOption {
   imports: [AppLogo, AttachmentChip, MarkdownView, VersionSwitcher],
   host: {
     '(document:click)': 'onDocumentClick($event)',
-    '(document:keydown.escape)': 'menuOpen.set(false)',
+    '(document:keydown.escape)': 'menuOpen.set(false); viewing.set(null)',
   },
   template: `
     <article class="message" [class.user]="isUser()" [class.assistant]="!isUser()" [attr.aria-label]="isUser() ? 'You said' : 'AIChat replied'">
@@ -40,16 +41,41 @@ interface ExportOption {
           @if (message().attachments.length) {
             <div class="files" role="list" aria-label="Attached files">
               @for (file of message().attachments; track file.fileId) {
-                <app-attachment-chip
-                  role="listitem"
-                  state="sent"
-                  [fileName]="file.fileName"
-                  [fileSize]="file.fileSize"
-                  [downloadable]="message().messageId > 0"
-                  [downloading]="downloadingFileId() === file.fileId"
-                  (download)="downloadFile(file)"
-                />
+                @if (file.isImage) {
+                  <button type="button" class="image-file" role="listitem" [attr.aria-label]="'View ' + file.fileName"
+                          [title]="file.fileName" (click)="viewImage(file)">
+                    @if (imageUrls().get(file.fileId)?.(); as src) {
+                      <img [src]="src" alt="" />
+                    } @else {
+                      <span class="image-loading" aria-hidden="true">IMG</span>
+                    }
+                  </button>
+                } @else {
+                  <app-attachment-chip
+                    role="listitem"
+                    state="sent"
+                    [fileName]="file.fileName"
+                    [fileSize]="file.fileSize"
+                    [downloadable]="message().messageId > 0"
+                    [downloading]="downloadingFileId() === file.fileId"
+                    (download)="downloadFile(file)"
+                  />
+                }
               }
+            </div>
+          }
+          @if (viewing(); as file) {
+            <div class="lightbox" role="dialog" aria-modal="true" [attr.aria-label]="file.fileName" (click)="viewing.set(null)">
+              @if (imageUrls().get(file.fileId)?.(); as src) {
+                <img [src]="src" [alt]="file.fileName" (click)="$event.stopPropagation()" />
+              }
+              <div class="lightbox-bar" (click)="$event.stopPropagation()">
+                <span class="lightbox-name">{{ file.fileName }}</span>
+                @if (message().messageId > 0) {
+                  <button type="button" [disabled]="downloadingFileId() === file.fileId" (click)="downloadFile(file)">Download</button>
+                }
+                <button #closeViewer type="button" (click)="viewing.set(null)">Close</button>
+              </div>
             </div>
           }
           @if (editing()) {
@@ -174,6 +200,25 @@ interface ExportOption {
     }
     .user .body { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
     .files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 100%; }
+    .image-file {
+      width: 160px; height: 160px; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+      background: var(--surface-raised); cursor: zoom-in; display: grid; place-items: center;
+    }
+    .image-file img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .image-file:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .image-loading { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); }
+    .lightbox {
+      position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 12px; padding: 16px; background: rgb(0 0 0 / 0.8);
+    }
+    .lightbox img { max-width: 100%; max-height: calc(100vh - 96px); object-fit: contain; border-radius: 8px; }
+    .lightbox-bar { display: flex; align-items: center; gap: 8px; max-width: 100%; color: #fff; }
+    .lightbox-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.875rem; }
+    .lightbox-bar button {
+      flex: none; padding: 6px 12px; border: 1px solid rgb(255 255 255 / 0.4); border-radius: 8px;
+      background: transparent; color: #fff; cursor: pointer;
+    }
+    .lightbox-bar button:hover:not(:disabled) { background: rgb(255 255 255 / 0.12); }
     .assistant .body { flex: 1; min-width: 0; }
     .content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
     .avatar { margin-top: 2px; }
@@ -239,6 +284,20 @@ export class ChatMessageView {
   private readonly notifications = inject(NotificationService);
   private readonly chatApi = inject(ChatApiService);
   private readonly fileApi = inject(FileApiService);
+  private readonly previews = inject(ImagePreviewService);
+
+  /** Thumbnail URLs of this message's images (fetched once, shared with every view of the same file). */
+  protected readonly imageUrls = computed(
+    () => new Map(this.message().attachments.filter((f) => f.isImage).map((f) => [f.fileId, this.previews.url(f.fileId)])),
+  );
+  /** The image open in the full-size viewer. */
+  protected readonly viewing = signal<AttachmentInfo | null>(null);
+  private readonly closeViewer = viewChild<ElementRef<HTMLButtonElement>>('closeViewer');
+
+  protected viewImage(file: AttachmentInfo): void {
+    this.viewing.set(file);
+    setTimeout(() => this.closeViewer()?.nativeElement.focus()); // after the viewer renders
+  }
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly message = input.required<ChatMessage>();

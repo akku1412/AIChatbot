@@ -124,7 +124,7 @@ describe('MessageInput', () => {
     fixture.detectChanges();
     press({});
     expect(sent).toEqual([
-      { text: 'summarize', attachments: [{ fileId: 'f1', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13 }] },
+      { text: 'summarize', attachments: [{ fileId: 'f1', fileName: 'report.pdf', fileExtension: '.pdf', fileSize: 13, isImage: false }] },
     ]);
   });
 
@@ -212,6 +212,43 @@ describe('MessageInput', () => {
       http.expectOne((req) => req.method === 'DELETE' && req.url.endsWith('/files/f9')).flush(null);
       vi.advanceTimersByTime(5000);
       http.expectNone((req) => req.method === 'GET' && req.url.endsWith('/files/f9'));
+    });
+  });
+
+  describe('images', () => {
+    const png = (size = 8) => new File([new Uint8Array(size)], 'chart.png', { type: 'image/png' });
+
+    beforeEach(() => {
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local-chart');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    it('shows a local thumbnail, uploads, and sends the image flagged for the vision model', () => {
+      pick(png());
+      expect(fixture.nativeElement.querySelector('app-attachment-chip img.thumb')?.getAttribute('src')).toBe('blob:local-chart');
+
+      http.expectOne((req) => req.url.endsWith('/files/upload')).flush({
+        fileId: 'img1', fileName: 'chart.png', fileExtension: '.png', contentType: 'image/png', fileSize: 8,
+        status: 'completed', statusMessage: null, pageCount: null, extractedCharacters: 0, isImage: true, createdAt: '',
+      });
+      fixture.detectChanges();
+      press({});
+      expect(sent).toEqual([
+        { text: '', attachments: [{ fileId: 'img1', fileName: 'chart.png', fileExtension: '.png', fileSize: 8, isImage: true }] },
+      ]);
+    });
+
+    it('applies the separate image size limit', () => {
+      pick(png(10 * 1024 * 1024 + 1));
+      http.expectNone((req) => req.url.endsWith('/files/upload'));
+      expect(fixture.nativeElement.querySelector('app-attachment-chip')).toBeNull();
+    });
+
+    it('frees the thumbnail when the image is removed before upload finishes', () => {
+      pick(png());
+      (fixture.nativeElement.querySelector('app-attachment-chip .remove') as HTMLButtonElement).click();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local-chart');
     });
   });
 

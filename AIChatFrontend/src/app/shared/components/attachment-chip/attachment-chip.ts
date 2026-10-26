@@ -21,7 +21,11 @@ export function formatFileSize(bytes: number): string {
   selector: 'app-attachment-chip',
   template: `
     <div class="chip" [class]="state()" [attr.title]="error() ?? fileName()">
-      <span class="badge" [class]="kind()" aria-hidden="true">{{ badge() }}</span>
+      @if (thumbnailUrl(); as src) {
+        <img class="thumb" [src]="src" alt="" />
+      } @else {
+        <span class="badge" [class]="kind()" aria-hidden="true">{{ badge() }}</span>
+      }
       <span class="text">
         <span class="name">{{ fileName() }}</span>
         <span class="meta" [class.error-text]="state() === 'error'">{{ meta() }}</span>
@@ -77,6 +81,8 @@ export function formatFileSize(bytes: number): string {
     .badge.word { background: #2563eb; }
     .badge.excel { background: #16a34a; }
     .badge.txt { background: #64748b; }
+    .badge.image { background: #9333ea; }
+    .thumb { flex: none; width: 34px; height: 34px; border-radius: 8px; object-fit: cover; background: var(--surface-hover); }
     .badge.other { background: var(--text-muted); }
     .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
     .name { font-size: 0.8125rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -116,6 +122,8 @@ export class AttachmentChip {
   readonly error = input<string | null>(null);
   /** While processing: the server's current step, e.g. "Reading scanned pages… 3/12". */
   readonly detail = input<string | null>(null);
+  /** Images: shown in place of the type badge. */
+  readonly thumbnailUrl = input<string | null>(null);
   readonly removable = input(false);
   /** Shows a download button for the original file (sent attachments). */
   readonly downloadable = input(false);
@@ -140,6 +148,11 @@ export class AttachmentChip {
         return 'excel';
       case '.txt':
         return 'txt';
+      case '.png':
+      case '.jpg':
+      case '.jpeg':
+      case '.webp':
+        return 'image';
       default:
         return 'other';
     }
@@ -155,6 +168,8 @@ export class AttachmentChip {
         return 'XLS';
       case 'txt':
         return 'TXT';
+      case 'image':
+        return 'IMG';
       default:
         return 'FILE';
     }
