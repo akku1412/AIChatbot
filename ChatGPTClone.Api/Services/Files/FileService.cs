@@ -3,6 +3,7 @@ using ChatGPTClone.Api.Data;
 using ChatGPTClone.Api.DTOs.Files;
 using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Models;
+using ChatGPTClone.Api.Services.Usage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -50,6 +51,7 @@ public sealed class FileService(
     IOptions<FileUploadOptions> options,
     IMalwareScanner scanner,
     IOptions<MalwareScanOptions> scanOptions,
+    IUsageService usage,
     ILogger<FileService> logger) : IFileService
 {
     private readonly FileUploadOptions _options = options.Value;
@@ -64,6 +66,7 @@ public sealed class FileService(
         {
             throw Problem(400, "Empty file", "The file is empty.", "empty");
         }
+        await usage.EnsureUploadQuotaAsync(userId, cancellationToken);
 
         var displayName = SanitizeFileName(file.FileName);
         var extension = Path.GetExtension(displayName).ToLowerInvariant();
@@ -142,6 +145,7 @@ public sealed class FileService(
             throw;
         }
 
+        await usage.RecordAsync(userId, new UsageDelta(Uploads: 1, UploadBytes: record.FileSize), CancellationToken.None);
         queue.Enqueue(new DocumentJob(record.FileId, DocumentJobKind.Process));
         logger.LogInformation("File {FileId} ({Extension}, {Size} bytes) uploaded by user {UserId}; queued for processing",
             record.FileId, extension, record.FileSize, userId);

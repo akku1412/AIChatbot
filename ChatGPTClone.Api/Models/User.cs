@@ -20,6 +20,12 @@ public class User : IAuditable
     /// <summary>True once the address was proven: an email OTP was verified, or Google reported it verified.</summary>
     public bool IsEmailVerified { get; set; }
 
+    /// <summary><see cref="UserRoles.User"/> or <see cref="UserRoles.Admin"/>. Checked live on every request.</summary>
+    public string Role { get; set; } = UserRoles.User;
+
+    /// <summary>Blocked by an admin: can't sign in, and signed-in sessions get 403 on every protected endpoint.</summary>
+    public bool IsBlocked { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

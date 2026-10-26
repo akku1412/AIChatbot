@@ -9,6 +9,8 @@ export interface User {
   /** True when a Google account is linked (signed in with Google at least once). */
   hasGoogleAccount: boolean;
   createdAt: string;
+  /** "Admin" shows the admin panel; the API checks the role itself on every admin call. */
+  role: 'User' | 'Admin';
 }
 
 /** Returned by POST /api/auth/send-otp and /api/auth/resend-otp. */

@@ -582,6 +582,37 @@ namespace ChatGPTClone.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UsageDaily", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<long>("InputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("UploadBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("UploadCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("UserId", "Date");
+
+                    b.HasIndex("Date")
+                        .HasDatabaseName("IX_UsageDaily_Date");
+
+                    b.ToTable("UsageDaily", (string)null);
+                });
+
             modelBuilder.Entity("ChatGPTClone.Api.Models.User", b =>
                 {
                     b.Property<int>("UserId")
@@ -607,6 +638,11 @@ namespace ChatGPTClone.Api.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<bool>("IsBlocked")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsEmailVerified")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -615,6 +651,13 @@ namespace ChatGPTClone.Api.Data.Migrations
                     b.Property<string>("ProfileImageUrl")
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("User");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2(3)");
@@ -822,6 +865,17 @@ namespace ChatGPTClone.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("ChatGPTClone.Api.Models.UploadedFile", b =>
+                {
+                    b.HasOne("ChatGPTClone.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ChatGPTClone.Api.Models.UsageDaily", b =>
                 {
                     b.HasOne("ChatGPTClone.Api.Models.User", "User")
                         .WithMany()

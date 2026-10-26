@@ -7,6 +7,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Models;
 using ChatGPTClone.Api.Services.Ai;
 using ChatGPTClone.Api.Services.Files;
+using ChatGPTClone.Api.Services.Usage;
 using ChatGPTClone.Api.Services.Web;
 using Microsoft.Extensions.Options;
 
@@ -105,6 +106,7 @@ public sealed class ChatService(
     IFileService fileService,
     IDocumentContextBuilder documentContext,
     IFileStorage fileStorage,
+    IUsageService usage,
     IOptions<AiOptions> options,
     IOptions<FileUploadOptions> fileOptions,
     ILogger<ChatService> logger) : IChatService
@@ -195,7 +197,7 @@ public sealed class ChatService(
         var turn = await PrepareTurnAsync(userId, conversationId, content, attachmentIds, cancellationToken, webSearch);
 
         // Ask the AI first: if it fails, nothing is saved, so the user can simply resend.
-        var completion = await CompleteAsync(turn.Model, turn.Prompt, _options.MaxOutputTokens, cancellationToken);
+        var completion = await CompleteAsync(userId, turn.Model, turn.Prompt, _options.MaxOutputTokens, cancellationToken);
         var (userMessage, assistantMessage) = await PersistAsync(turn, completion.Content, completion.TotalTokens,
             stopped: false, completion.Truncated, cancellationToken);
 
@@ -294,6 +296,9 @@ public sealed class ChatService(
     private async Task<ChatTurn> BuildTurnAsync(int userId, Conversation conversation, string text, List<UploadedFile> newFiles,
         List<MessageNode> historyPath, CancellationToken cancellationToken, bool searchWeb = false)
     {
+        // Every way of asking the AI (send, regenerate, edit) comes through here: refuse once today's tokens are used up.
+        await usage.EnsureTokenQuotaAsync(userId, cancellationToken);
+
         var recentIds = historyPath.TakeLast(_options.MaxHistoryMessages).Select(n => n.MessageId).ToList();
         var history = await messageRepository.GetByIdsAsync(recentIds, cancellationToken);
 
@@ -329,7 +334,7 @@ public sealed class ChatService(
         {
             try
             {
-                var query = await SearchQueryAsync(history, text, cancellationToken);
+                var query = await SearchQueryAsync(userId, history, text, cancellationToken);
                 webResults = await webSearchProvider.SearchAsync(query, cancellationToken);
                 web = WebResults.Block(webResults, DateTime.UtcNow);
                 logger.LogInformation("Web search for conversation {ConversationId}: {Count} results", conversation.ConversationId, webResults.Count);
@@ -365,7 +370,7 @@ public sealed class ChatService(
     /// The search query: the question itself, or for a follow-up ("and in Europe?") a standalone query written by the
     /// default model from the recent conversation. Falls back to the question if that fails.
     /// </summary>
-    private async Task<string> SearchQueryAsync(List<Message> history, string text, CancellationToken cancellationToken)
+    private async Task<string> SearchQueryAsync(int userId, List<Message> history, string text, CancellationToken cancellationToken)
     {
         var question = Truncate(text, 400);
         if (history.Count == 0)
@@ -380,7 +385,7 @@ public sealed class ChatService(
                 .. history.TakeLast(4).Select(m => new AiChatMessage(m.Role, Truncate(m.Content, 600))),
                 new(MessageRole.User, question),
             ];
-            var result = await models.Provider(null).CompleteAsync(prompt, 40, cancellationToken);
+            var result = await Metered(null, userId).CompleteAsync(prompt, 40, cancellationToken);
             var query = result.Content.Trim().Trim('"', '\'').Trim();
             return query.Length is > 0 and <= 400 ? query : question;
         }
@@ -418,7 +423,7 @@ public sealed class ChatService(
     public async IAsyncEnumerable<AiStreamUpdate> StreamReplyAsync(ChatTurn turn,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var provider = models.Provider(turn.Model.Id);
+        var provider = Metered(turn.Model.Id, turn.Conversation.UserId);
         var updates = provider.StreamAsync(turn.Prompt, _options.MaxOutputTokens, cancellationToken).GetAsyncEnumerator(cancellationToken);
         try
         {
@@ -534,10 +539,11 @@ public sealed class ChatService(
         {
             conversation.Title = assistantMessage is null || stopped
                 ? FallbackTitle(turn.Text)
-                : await GenerateTitleAsync(turn.Text, assistantMessage.Content, cancellationToken);
+                : await GenerateTitleAsync(conversation.UserId, turn.Text, assistantMessage.Content, cancellationToken);
         }
         conversation.UpdatedAt = DateTime.UtcNow; // marks it modified; AppDbContext stamps the exact time
         await conversationRepository.SaveChangesAsync(cancellationToken);
+        await usage.RecordAsync(conversation.UserId, new UsageDelta(Messages: 1), cancellationToken);
 
         if (assistantMessage is not null)
         {
@@ -668,10 +674,15 @@ public sealed class ChatService(
         return names.Count == 0 ? text : $"{text}\n\n[Attached: {string.Join(", ", names)}]";
     }
 
-    private async Task<AiCompletion> CompleteAsync(AiModelOption model, List<AiChatMessage> prompt, int maxTokens,
+    /// <summary>The model's provider, adding every call's tokens to the user's daily usage.</summary>
+    private IAiChatProvider Metered(string? modelId, int userId) =>
+        new MeteredAiChatProvider(models.Provider(modelId), u =>
+            usage.RecordAsync(userId, new UsageDelta(InputTokens: u.InputTokens, OutputTokens: u.OutputTokens), CancellationToken.None));
+
+    private async Task<AiCompletion> CompleteAsync(int userId, AiModelOption model, List<AiChatMessage> prompt, int maxTokens,
         CancellationToken cancellationToken)
     {
-        var provider = models.Provider(model.Id);
+        var provider = Metered(model.Id, userId);
         try
         {
             return await provider.CompleteAsync(prompt, maxTokens, cancellationToken);
@@ -684,12 +695,12 @@ public sealed class ChatService(
     }
 
     /// <summary>A short title from the AI; falls back to the start of the first message if that fails.</summary>
-    private async Task<string> GenerateTitleAsync(string userText, string assistantText, CancellationToken cancellationToken)
+    private async Task<string> GenerateTitleAsync(int userId, string userText, string assistantText, CancellationToken cancellationToken)
     {
         try
         {
             // Titles always use the default model: short, cheap, and independent of the chat's pick.
-            var result = await models.Provider(null).CompleteAsync(
+            var result = await Metered(null, userId).CompleteAsync(
             [
                 new AiChatMessage(MessageRole.System,
                     "Write a short title (3 to 6 words) for this conversation. Reply with the title only: " +

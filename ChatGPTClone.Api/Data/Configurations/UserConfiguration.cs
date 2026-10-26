@@ -16,6 +16,9 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Email).HasMaxLength(256).IsRequired();
         builder.Property(u => u.ProfileImageUrl).HasMaxLength(2048);
         builder.Property(u => u.IsEmailVerified).HasDefaultValue(false);
+        // Defaults let the migration add the columns to existing rows: everyone starts as an unblocked User.
+        builder.Property(u => u.Role).HasMaxLength(20).IsRequired().HasDefaultValue(UserRoles.User);
+        builder.Property(u => u.IsBlocked).HasDefaultValue(false);
         builder.Property(u => u.CreatedAt).HasColumnType("datetime2(3)");
         builder.Property(u => u.UpdatedAt).HasColumnType("datetime2(3)");
 

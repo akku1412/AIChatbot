@@ -21,6 +21,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
     public DbSet<SharedLink> SharedLinks => Set<SharedLink>();
     public DbSet<MessageFeedback> MessageFeedback => Set<MessageFeedback>();
+    public DbSet<UsageDaily> UsageDaily => Set<UsageDaily>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -9,10 +9,13 @@ public sealed record AiChatMessage(MessageRole Role, string Content, IReadOnlyLi
 /// <summary>An image for the AI to look at (already cleaned: re-encoded, metadata removed).</summary>
 public sealed record AiImage(byte[] Data, string ContentType);
 
-public sealed record AiCompletion(string Content, int? TotalTokens, bool Truncated);
+/// <summary>Tokens the provider reported for one call (what it bills).</summary>
+public sealed record AiUsage(long InputTokens, long OutputTokens);
+
+public sealed record AiCompletion(string Content, int? TotalTokens, bool Truncated, AiUsage? Usage = null);
 
 /// <summary>A piece of a streamed reply. The final update has empty text and carries usage and truncation.</summary>
-public sealed record AiStreamUpdate(string Text, int? TotalTokens = null, bool Truncated = false);
+public sealed record AiStreamUpdate(string Text, int? TotalTokens = null, bool Truncated = false, AiUsage? Usage = null);
 
 /// <summary>Vendor-neutral chat completion. Implementations: OpenAiChatProvider (add more for other models).</summary>
 public interface IAiChatProvider

@@ -106,7 +106,7 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         }
 
         return new AiCompletion(text.Trim(), completion.Usage?.TotalTokenCount,
-            completion.FinishReason == ChatFinishReason.Length);
+            completion.FinishReason == ChatFinishReason.Length, ToUsage(completion.Usage));
     }
 
     /// <summary>
@@ -125,6 +125,7 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         var updates = Start(request);
 
         int? totalTokens = null;
+        AiUsage? usage = null;
         var truncated = false;
         var anyText = false;
         try
@@ -167,6 +168,7 @@ public sealed class OpenAiChatProvider : IAiChatProvider
                 }
                 truncated |= update.FinishReason == ChatFinishReason.Length;
                 totalTokens = update.Usage?.TotalTokenCount ?? totalTokens;
+                usage = ToUsage(update.Usage) ?? usage;
 
                 var text = string.Concat(update.ContentUpdate.Where(p => p.Kind == ChatMessageContentPartKind.Text).Select(p => p.Text));
                 if (text.Length > 0)
@@ -185,8 +187,11 @@ public sealed class OpenAiChatProvider : IAiChatProvider
         {
             throw new AiProviderException(AiFailureKind.EmptyResponse, $"{Name} returned an empty reply.");
         }
-        yield return new AiStreamUpdate("", totalTokens, truncated);
+        yield return new AiStreamUpdate("", totalTokens, truncated, usage);
     }
+
+    private static AiUsage? ToUsage(ChatTokenUsage? usage) =>
+        usage is null ? null : new AiUsage(usage.InputTokenCount, usage.OutputTokenCount);
 
     private ChatClient RequireClient() =>
         _client ?? throw new AiProviderException(AiFailureKind.NotConfigured, $"{Name} API key is not configured.");

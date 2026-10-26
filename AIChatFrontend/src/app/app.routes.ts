@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 
-import { authGuard, guestGuard, otpChallengeGuard } from './core/guards/auth.guard';
+import { adminGuard, authGuard, guestGuard, otpChallengeGuard } from './core/guards/auth.guard';
 
 const chatThread = () => import('./features/chat/chat-thread').then((m) => m.ChatThread);
 
@@ -43,6 +43,29 @@ export const routes: Routes = [
         path: 'profile',
         title: 'Profile · AIChat',
         loadComponent: () => import('./features/profile/profile').then((m) => m.Profile),
+      },
+      {
+        path: 'admin',
+        canActivate: [adminGuard],
+        loadComponent: () => import('./features/admin/admin-page').then((m) => m.AdminPage),
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'users' },
+          {
+            path: 'users',
+            title: 'Users · Admin · AIChat',
+            loadComponent: () => import('./features/admin/admin-users').then((m) => m.AdminUsers),
+          },
+          {
+            path: 'usage',
+            title: 'Usage · Admin · AIChat',
+            loadComponent: () => import('./features/admin/admin-usage').then((m) => m.AdminUsage),
+          },
+          {
+            path: 'feedback',
+            title: 'Feedback · Admin · AIChat',
+            loadComponent: () => import('./features/admin/admin-feedback').then((m) => m.AdminFeedbackPage),
+          },
+        ],
       },
     ],
   },

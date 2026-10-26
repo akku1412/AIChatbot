@@ -22,6 +22,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
   return next(token && !isAuthEndpoint ? withBearer(req, token) : req).pipe(
     catchError((error: unknown) => {
+      if (!isAuthEndpoint && isAccountBlocked(error)) {
+        auth.handleBlocked();
+        return throwError(() => error);
+      }
       if (isAuthEndpoint || !(error instanceof HttpErrorResponse) || error.status !== 401) {
         return throwError(() => error);
       }
@@ -39,6 +43,16 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
     }),
   );
 };
+
+/** 403 "account_blocked": an admin blocked the account while it was signed in. */
+function isAccountBlocked(error: unknown): boolean {
+  return (
+    error instanceof HttpErrorResponse &&
+    error.status === 403 &&
+    typeof error.error === 'object' &&
+    error.error?.reason === 'account_blocked'
+  );
+}
 
 function withBearer(req: HttpRequest<unknown>, token: string): HttpRequest<unknown> {
   return req.clone({ setHeaders: { Authorization: `Bearer ${token}` } });

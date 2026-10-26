@@ -30,6 +30,8 @@ export class Login {
   /** Query params (bound by withComponentInputBinding). */
   readonly returnUrl = input<string>();
   readonly expired = input<string>();
+  /** Set when an admin blocked the account during the session. */
+  readonly blocked = input<string>();
   /** Prefilled when the user chose "change email" on the code page. */
   readonly email = input<string>();
 

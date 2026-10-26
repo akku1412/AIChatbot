@@ -9,9 +9,10 @@ public sealed record UserDto(
     string? ProfileImageUrl,
     bool IsEmailVerified,
     bool HasGoogleAccount,
-    DateTime CreatedAt)
+    DateTime CreatedAt,
+    string Role)
 {
     public static UserDto From(User user) =>
         new(user.UserId, user.FullName, user.Email, user.ProfileImageUrl, user.IsEmailVerified,
-            user.GoogleId is not null, user.CreatedAt);
+            user.GoogleId is not null, user.CreatedAt, user.Role);
 }

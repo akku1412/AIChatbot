@@ -14,6 +14,10 @@ export const authGuard: CanActivateFn = (_route, state) => {
     .pipe(map((ok) => ok || router.createUrlTree(['/login'], { queryParams: { returnUrl: state.url } })));
 };
 
+/** Admin pages (inside the signed-in area, so the session is already restored): other users go to the chat. */
+export const adminGuard: CanActivateFn = () =>
+  inject(AuthService).user()?.role === 'Admin' || inject(Router).createUrlTree(['/chat']);
+
 /** Code page: only reachable while an email sign-in is waiting for its code. */
 export const otpChallengeGuard: CanActivateFn = () => {
   const auth = inject(AuthService);

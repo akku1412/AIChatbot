@@ -29,6 +29,8 @@ public sealed class TokenService(IOptions<JwtOptions> options, TimeProvider time
                 new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email),
                 new Claim(JwtRegisteredClaimNames.Name, user.FullName),
+                // Informational for clients; the API replaces it with the current role on every request.
+                new Claim(UserAccessClaims.Role, user.Role),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             ]),
             SigningCredentials = new SigningCredentials(

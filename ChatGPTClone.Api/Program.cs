@@ -12,6 +12,7 @@ using ChatGPTClone.Api.Services.Audio;
 using ChatGPTClone.Api.Services.Embeddings;
 using ChatGPTClone.Api.Services.Export;
 using ChatGPTClone.Api.Services.Files;
+using ChatGPTClone.Api.Services.Usage;
 using ChatGPTClone.Api.Services.Web;
 using ChatGPTClone.Api.Validators;
 using FluentValidation;
@@ -72,6 +73,11 @@ builder.Services.AddOptions<MalwareScanOptions>()
     .Bind(builder.Configuration.GetSection(MalwareScanOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddOptions<UsageOptions>()
+    .Bind(builder.Configuration.GetSection(UsageOptions.SectionName))
+    .ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<AdminOptions>()
+    .Bind(builder.Configuration.GetSection(AdminOptions.SectionName));
 builder.Services.AddOptions<WebSearchOptions>()
     .Bind(builder.Configuration.GetSection(WebSearchOptions.SectionName))
     .ValidateDataAnnotations()
@@ -103,7 +109,10 @@ builder.Services
             ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
             ClockSkew = TimeSpan.FromSeconds(30),
             NameClaimType = "name",
+            RoleClaimType = UserAccessClaims.Role,
         };
+        // The role and block state come from the database (briefly cached), not from the token.
+        o.Events = new JwtBearerEvents { OnTokenValidated = UserAccessClaims.ApplyCurrentAccessAsync };
     });
 
 // Every endpoint requires a valid access token unless it is explicitly marked [AllowAnonymous].
@@ -121,6 +130,9 @@ if (!string.IsNullOrWhiteSpace(keysPath))
     dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
 }
 
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IUserAccessCache, UserAccessCache>();
+
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IOtpRepository, OtpRepository>();
 builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
@@ -131,6 +143,9 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ISharingService, SharingService>();
 builder.Services.AddScoped<IFeedbackService, FeedbackService>();
+// Daily usage per user (tokens, messages, uploads), the quotas checked against it, and the admin panel.
+builder.Services.AddScoped<IUsageService, UsageService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 // "Search the web": Tavily over HTTPS; the key stays on the server (WebSearch:ApiKey in user secrets).
 builder.Services.AddHttpClient<IWebSearchProvider, TavilyWebSearchProvider>();
 // Voice input: speech-to-text over the OpenAI audio API (OpenAI or Groq), configured under Ai:Transcription.
@@ -357,6 +372,7 @@ app.UseStaticFiles();
 
 app.UseCors(CorsSettings.PolicyName);
 app.UseAuthentication(); // before the rate limiter, so per-user policies can see the user
+app.UseMiddleware<BlockedUserMiddleware>();
 app.UseRateLimiter();
 app.UseAuthorization();
 

@@ -436,9 +436,14 @@
   cursor: pointer;
 }
 
-.archived-link:hover {
+.archived-link:hover,
+.archived-link.active {
   background: var(--surface-hover);
   color: var(--text);
+}
+
+a.archived-link {
+  text-decoration: none;
 }
 
 /* "Move to project" inside a chat's menu. */

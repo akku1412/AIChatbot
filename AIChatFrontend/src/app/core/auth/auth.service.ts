@@ -142,6 +142,15 @@ export class AuthService {
     this.router.navigate(['/login'], { queryParams: { expired: 1 } });
   }
 
+  /** An admin blocked this account: end the session (the server already revoked it) and explain on the login page. */
+  handleBlocked(): void {
+    if (!this.currentUser() && !this.accessToken) {
+      return; // several requests can fail at once; only the first one navigates
+    }
+    this.clearSession();
+    this.router.navigate(['/login'], { queryParams: { blocked: 1 } });
+  }
+
   private setSession(response: AuthResponse): void {
     this.accessToken = response.accessToken;
     this.accessTokenExpiresAt = Date.parse(response.accessTokenExpiresAt);

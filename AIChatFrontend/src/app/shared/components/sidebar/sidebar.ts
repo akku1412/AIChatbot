@@ -270,6 +270,13 @@ export function highlightMatches(text: string, query: string): TextPart[] {
         </button>
       }
 
+      @if (user()?.role === 'Admin') {
+        <a class="archived-link" routerLink="/admin" routerLinkActive="active" (click)="selected.emit()">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          Admin
+        </a>
+      }
+
       @if (user(); as u) {
         <div class="profile">
           <a class="profile-link" routerLink="/profile" routerLinkActive="active" title="Your profile" (click)="selected.emit()">

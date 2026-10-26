@@ -1,5 +1,6 @@
 using System.Globalization;
 using ChatGPTClone.Api.Authentication;
+using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.DTOs.Auth;
 using ChatGPTClone.Api.DTOs.Users;
 using ChatGPTClone.Api.Interfaces;
@@ -7,6 +8,7 @@ using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ChatGPTClone.Api.Services;
 
@@ -23,6 +25,8 @@ public sealed class AuthService(
     IOtpService otpService,
     ITokenService tokenService,
     IRefreshTokenService refreshTokenService,
+    IUserAccessCache accessCache,
+    IOptions<AdminOptions> adminOptions,
     ILogger<AuthService> logger) : IAuthService
 {
     // ---------------- Email OTP ----------------
@@ -89,6 +93,11 @@ public sealed class AuthService(
         {
             await refreshTokenService.RevokeAsync(rotated.Next.Token, cancellationToken);
             throw new ApiException(StatusCodes.Status401Unauthorized, "Session expired", "Please sign in again.");
+        }
+        if (rotated.User.IsBlocked)
+        {
+            await refreshTokenService.RevokeAsync(rotated.Next.Token, cancellationToken);
+            throw Blocked();
         }
 
         return CreateSession(rotated.User, rotated.Next);
@@ -180,10 +189,30 @@ public sealed class AuthService(
 
     private async Task<AuthSession> StartSessionAsync(User user, string method, CancellationToken cancellationToken)
     {
+        if (user.IsBlocked)
+        {
+            logger.LogInformation("Blocked user {UserId} tried to sign in with {Method}", user.UserId, method);
+            throw Blocked();
+        }
+
+        // Admin:Emails is how the first admin is made: the account becomes an admin when it signs in.
+        if (user.Role != UserRoles.Admin
+            && adminOptions.Value.Emails.Any(e => string.Equals(e.Trim(), user.Email, StringComparison.OrdinalIgnoreCase)))
+        {
+            user.Role = UserRoles.Admin;
+            await userRepository.SaveChangesAsync(cancellationToken);
+            accessCache.Invalidate(user.UserId);
+            logger.LogInformation("User {UserId} made an admin (listed in Admin:Emails)", user.UserId);
+        }
+
         var refreshToken = await refreshTokenService.IssueAsync(user.UserId, cancellationToken);
         logger.LogInformation("User {UserId} signed in with {Method}", user.UserId, method);
         return CreateSession(user, refreshToken);
     }
+
+    private static ApiException Blocked() =>
+        new(StatusCodes.Status403Forbidden, "Account blocked", BlockedUserMiddleware.Message,
+            new Dictionary<string, object?> { ["reason"] = "account_blocked" });
 
     private AuthSession CreateSession(User user, IssuedRefreshToken refreshToken)
     {

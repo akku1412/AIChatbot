@@ -30,6 +30,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     public const string TestDatabase = "ChatGPTCloneDB_Tests";
 
+    /// <summary>Listed in Admin:Emails, so signing in with it makes the account an admin.</summary>
+    public const string AdminEmail = "admin@example.test";
+
     private static readonly string ConnectionString =
         Environment.GetEnvironmentVariable("CHATGPTCLONE_TEST_DB")
         ?? $@"Server=AKANSHA\SQL2016;Database={TestDatabase};Trusted_Connection=True;TrustServerCertificate=True";
@@ -69,6 +72,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Ai:Models:1:Label", "Smart");
         builder.UseSetting("Ai:Models:1:Model", "smart-model-name");
         builder.UseSetting("Ai:Models:1:SupportsVision", "true");
+        builder.UseSetting("Admin:Emails:0", AdminEmail);
         builder.UseSetting("RateLimits:GlobalPerMinute", "100000");
         builder.UseSetting("RateLimits:AuthPerMinute", "100000");
         builder.UseSetting("RateLimits:AiChatPerMinute", "100000");
