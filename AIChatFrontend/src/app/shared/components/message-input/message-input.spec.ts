@@ -2,6 +2,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { DOC_NOT_SUPPORTED_TEXT } from '../../../core/models/chat.models';
+import { NotificationService } from '../toast/notification.service';
 import { ComposerSubmit, MessageInput } from './message-input';
 
 describe('MessageInput', () => {
@@ -100,6 +102,24 @@ describe('MessageInput', () => {
     pick(new File(['x'], 'notes.rtf', { type: 'application/rtf' }));
     http.expectNone((req) => req.url.endsWith('/files/upload'));
     expect(fixture.nativeElement.querySelector('app-attachment-chip')).toBeNull();
+  });
+
+  it.each([
+    ['sales.csv', 'text/csv', 'CSV'],
+    ['deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'PPT'],
+  ])('accepts %s and labels it %s', (name, type, badge) => {
+    pick(new File(['x'], name, { type }));
+    http.expectOne((req) => req.url.endsWith('/files/upload'));
+    expect(fixture.nativeElement.querySelector('app-attachment-chip .badge')?.textContent).toBe(badge);
+  });
+
+  it('explains how to convert a Word 97–2003 .doc instead of uploading it', () => {
+    const errors: string[] = [];
+    vi.spyOn(TestBed.inject(NotificationService), 'error').mockImplementation((m: string) => void errors.push(m));
+    pick(new File(['x'], 'old.doc', { type: 'application/msword' }));
+    http.expectNone((req) => req.url.endsWith('/files/upload'));
+    expect(errors).toEqual([`"old.doc": ${DOC_NOT_SUPPORTED_TEXT}`]);
+    vi.restoreAllMocks();
   });
 
   it('accepts .txt files', () => {

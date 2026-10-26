@@ -81,6 +81,8 @@ export function formatFileSize(bytes: number): string {
     .badge.word { background: #2563eb; }
     .badge.excel { background: #16a34a; }
     .badge.txt { background: #64748b; }
+    .badge.csv { background: #0d9488; }
+    .badge.powerpoint { background: #ea580c; }
     .badge.image { background: #9333ea; }
     .thumb { flex: none; width: 34px; height: 34px; border-radius: 8px; object-fit: cover; background: var(--surface-hover); }
     .badge.other { background: var(--text-muted); }
@@ -148,6 +150,10 @@ export class AttachmentChip {
         return 'excel';
       case '.txt':
         return 'txt';
+      case '.csv':
+        return 'csv';
+      case '.pptx':
+        return 'powerpoint';
       case '.png':
       case '.jpg':
       case '.jpeg':
@@ -168,6 +174,10 @@ export class AttachmentChip {
         return 'XLS';
       case 'txt':
         return 'TXT';
+      case 'csv':
+        return 'CSV';
+      case 'powerpoint':
+        return 'PPT';
       case 'image':
         return 'IMG';
       default:

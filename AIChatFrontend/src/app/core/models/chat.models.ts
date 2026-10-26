@@ -106,10 +106,18 @@ export interface UploadLimits {
 export const DEFAULT_UPLOAD_LIMITS: UploadLimits = {
   maxFileSizeBytes: 20 * 1024 * 1024,
   maxFilesPerMessage: 5,
-  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls', '.txt', '.png', '.jpg', '.jpeg', '.webp'],
+  allowedExtensions: ['.pdf', '.docx', '.xlsx', '.xls', '.csv', '.pptx', '.txt', '.png', '.jpg', '.jpeg', '.webp'],
   maxImageSizeBytes: 10 * 1024 * 1024,
   imageExtensions: ['.png', '.jpg', '.jpeg', '.webp'],
 };
+
+/** Same wording as the server's "unsupported file type" error. */
+export const SUPPORTED_FILES_TEXT =
+  'PDF, Word (.docx), Excel (.xlsx, .xls), CSV, PowerPoint (.pptx), text (.txt) and images (PNG, JPG, WebP)';
+
+/** Word 97–2003 can't be read safely on the server; tell the user how to convert it (matches the server message). */
+export const DOC_NOT_SUPPORTED_TEXT =
+  "Word 97–2003 (.doc) files aren't supported. Open the file in Word, choose File → Save As → Word Document (.docx), and upload that.";
 
 export interface MessagePage {
   items: ChatMessage[];

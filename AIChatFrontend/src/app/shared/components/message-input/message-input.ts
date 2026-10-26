@@ -15,7 +15,13 @@ import {
 import { Subscription } from 'rxjs';
 
 import { errorMessage } from '../../../core/http/api-error';
-import { AttachmentInfo, MAX_MESSAGE_LENGTH, UploadedFile } from '../../../core/models/chat.models';
+import {
+  AttachmentInfo,
+  DOC_NOT_SUPPORTED_TEXT,
+  MAX_MESSAGE_LENGTH,
+  SUPPORTED_FILES_TEXT,
+  UploadedFile,
+} from '../../../core/models/chat.models';
 import { FileApiService, isProcessing, processingLabel } from '../../../core/services/file-api.service';
 import { ImagePreviewService, createObjectUrl, revokeObjectUrl } from '../../../core/services/image-preview.service';
 import { AttachmentChip, ChipState, formatFileSize } from '../attachment-chip/attachment-chip';
@@ -225,8 +231,12 @@ export class MessageInput {
 
     for (const file of files) {
       const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
+      if (extension === '.doc') {
+        this.notifications.error(`"${file.name}": ${DOC_NOT_SUPPORTED_TEXT}`);
+        continue;
+      }
       if (!allowedExtensions.includes(extension)) {
-        this.notifications.error(`"${file.name}" isn't supported. Attach PDF, Word (.docx), Excel (.xlsx, .xls), text (.txt) or image (PNG, JPG, WebP) files.`);
+        this.notifications.error(`"${file.name}" isn't supported. Supported files: ${SUPPORTED_FILES_TEXT}.`);
         continue;
       }
       if (file.size === 0) {

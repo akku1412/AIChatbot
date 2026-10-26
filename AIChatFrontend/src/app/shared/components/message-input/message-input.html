@@ -23,8 +23,8 @@
       type="button"
       class="attach"
       [disabled]="disabled()"
-      aria-label="Attach files (PDF, Word, Excel, text, images)"
-      title="Attach PDF, Word, Excel, text or image files"
+      aria-label="Attach files (PDF, Word, Excel, CSV, PowerPoint, text, images)"
+      title="Attach PDF, Word, Excel, CSV, PowerPoint, text or image files"
       (click)="openPicker()"
     >
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -67,7 +67,7 @@
   @if (dragging()) {
     <div class="drop-overlay" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 16V4M6 10l6-6 6 6M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-      Drop PDF, Word, Excel, text or image files to attach
+      Drop documents, spreadsheets, slides or images to attach
     </div>
   }
 </form>
