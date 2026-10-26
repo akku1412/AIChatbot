@@ -1,0 +1,103 @@
+<div class="page">
+  <div class="column">
+    @if (loadError(); as error) {
+      <section class="card" role="alert">
+        <h3>Project not available</h3>
+        <p class="muted">{{ error }}</p>
+        <a class="btn secondary" routerLink="/chat">Back to chats</a>
+      </section>
+    } @else if (detail(); as d) {
+      <header class="page-head">
+        <h1>{{ d.name }}</h1>
+        <p class="muted">Chats in this project follow its instructions and can use its files.</p>
+      </header>
+
+      <section class="card" aria-labelledby="settings-title">
+        <h3 id="settings-title">Name and instructions</h3>
+        <form (submit)="$event.preventDefault(); save()" novalidate>
+          <label class="field-label" for="project-name">Name</label>
+          <input id="project-name" type="text" [value]="name()" (input)="name.set($any($event.target).value)"
+                 [attr.maxlength]="nameMax" autocomplete="off" />
+
+          <label class="field-label" for="project-instructions">Instructions</label>
+          <textarea id="project-instructions" rows="6" [value]="instructions()" (input)="instructions.set($any($event.target).value)"
+                    [attr.maxlength]="instructionsMax" aria-describedby="instructions-count"
+                    placeholder="e.g. You are helping me plan our product launch. Keep answers short and list next steps."></textarea>
+          <p class="count" id="instructions-count" [class.near]="instructions().length > instructionsMax - 200">
+            {{ instructions().length }}/{{ instructionsMax }}
+          </p>
+
+          <div class="actions">
+            <button type="button" class="btn secondary" [disabled]="!changed() || saving()" (click)="discard()">Discard changes</button>
+            <button type="submit" class="btn primary" [disabled]="!canSave()">
+              @if (saving()) {
+                <app-loading-spinner [size]="14" label="Saving" />
+              }
+              Save
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="files-title">
+        <div class="section-head">
+          <h3 id="files-title">Files <span class="muted small">{{ d.files.length }}/{{ maxFiles }}</span></h3>
+          <label class="btn secondary small" [class.disabled]="full()" [attr.aria-disabled]="full()">
+            Add files
+            <input type="file" class="picker" multiple [accept]="accept()" [disabled]="full()" (change)="onPicked($event)" />
+          </label>
+        </div>
+        <p class="muted">Every chat in this project searches these files, as if they were attached.</p>
+
+        @if (d.files.length === 0 && uploading().length === 0) {
+          <p class="empty">No files yet.</p>
+        }
+        <ul class="files">
+          @for (file of d.files; track file.fileId) {
+            <li>
+              <app-attachment-chip [fileName]="file.fileName" [fileSize]="file.fileSize" [state]="chipState(file)"
+                                   [detail]="processingText(file)" [error]="file.statusMessage ?? 'This file couldn\'t be read.'" />
+              <button type="button" class="btn secondary small" [attr.aria-label]="'Remove ' + file.fileName + ' from the project'"
+                      (click)="removeFile(file)">Remove</button>
+            </li>
+          }
+          @for (name of uploading(); track $index) {
+            <li class="pending">
+              <app-attachment-chip [fileName]="name" state="processing" detail="Uploading…" />
+            </li>
+          }
+        </ul>
+      </section>
+
+      <section class="card" aria-labelledby="chats-title">
+        <div class="section-head">
+          <h3 id="chats-title">Chats</h3>
+          <button type="button" class="btn primary small" (click)="newChat()">New chat in this project</button>
+        </div>
+        @if (chats().length === 0) {
+          <p class="empty">No chats yet. Start one, or move a chat here from its ⋯ menu in the sidebar.</p>
+        } @else {
+          <ul class="chats">
+            @for (chat of chats(); track chat.conversationId) {
+              <li>
+                <a [routerLink]="['/chat', chat.conversationId]" [title]="chat.title">{{ chat.title }}</a>
+                <button type="button" class="btn secondary small" [attr.aria-label]="'Move ' + chat.title + ' out of the project'"
+                        (click)="removeChat(chat)">Move out</button>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+
+      <section class="card danger-zone" aria-labelledby="delete-title">
+        <div>
+          <h3 id="delete-title">Delete project</h3>
+          <p class="muted">Its chats move back to your main chat list; its files stay in your uploads.</p>
+        </div>
+        <button type="button" class="btn danger-outline" (click)="deleteProject()">Delete project</button>
+      </section>
+    } @else {
+      <div class="loading"><app-loading-spinner label="Loading project" /></div>
+    }
+  </div>
+</div>

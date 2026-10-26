@@ -93,6 +93,11 @@ public sealed class ProjectTests(ApiFactory factory)
         // And back out again.
         await SendAsync(user, HttpMethod.Put, $"/api/conversations/{moved}/project", new { projectId = (int?)null });
         Assert.Equal([moved, loose], await ListChatsAsync(user));
+
+        // Archived project chats leave the folder and show in the one archived list.
+        await SendAsync(user, HttpMethod.Patch, $"/api/conversations/{inside}", new { archived = true });
+        Assert.Empty(await ListChatsAsync(user, $"?projectId={project}"));
+        Assert.Equal([inside], await ListChatsAsync(user, "?archived=true"));
     }
 
     [Fact]

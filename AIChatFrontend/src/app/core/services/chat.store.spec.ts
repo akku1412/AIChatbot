@@ -6,10 +6,12 @@ import { ChatMessage, ChatStreamEvent, ConversationSummary, StreamTurnResult } f
 import { ChatApiService } from './chat-api.service';
 import { ChatStore, STREAM_RENDER_INTERVAL_MS, sortConversations } from './chat.store';
 import { ModelService } from './model.service';
+import { ProjectService } from './project.service';
 
 describe('ChatStore', () => {
   let store: ChatStore;
   let stream: Subject<ChatStreamEvent>;
+  const projectService = { adjustConversationCount: vi.fn(), reset: vi.fn(), projects: signal([]) };
   const api = {
     streamMessage: vi.fn(),
     regenerateMessage: vi.fn(),
@@ -20,6 +22,8 @@ describe('ChatStore', () => {
     patchConversation: vi.fn(),
     searchConversations: vi.fn(),
     createConversation: vi.fn(),
+    listConversations: vi.fn(),
+    moveConversation: vi.fn(),
     deleteConversation: vi.fn(() => of(undefined)),
   };
 
@@ -50,7 +54,11 @@ describe('ChatStore', () => {
       effectiveId: ModelService.prototype.effectiveId,
     };
     TestBed.configureTestingModule({
-      providers: [{ provide: ChatApiService, useValue: api }, { provide: ModelService, useValue: models }],
+      providers: [
+        { provide: ChatApiService, useValue: api },
+        { provide: ModelService, useValue: models },
+        { provide: ProjectService, useValue: projectService },
+      ],
     });
     store = TestBed.inject(ChatStore);
     store.activeConversationId.set(7);
@@ -59,6 +67,59 @@ describe('ChatStore', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  describe('projects', () => {
+    const inProject = (id: number, projectId: number, extra: Partial<ConversationSummary> = {}) => conv(id, { projectId, ...extra });
+
+    it('a new chat started in a project is created there and listed in its folder, not the main list', () => {
+      store.newChatIn(3);
+      expect(store.activeConversationId()).toBeNull();
+      api.createConversation.mockReturnValue(of(inProject(9, 3)));
+
+      store.send('hi').subscribe();
+
+      expect(api.createConversation).toHaveBeenCalledWith(undefined, undefined, 3);
+      expect(store.conversations().map((c) => c.conversationId)).toEqual([]);
+      expect(store.projectConversations()[3]?.map((c) => c.conversationId)).toEqual([9]);
+      expect(projectService.adjustConversationCount).toHaveBeenCalledWith(3, 1);
+      expect(store.activeConversation()?.conversationId).toBe(9);
+    });
+
+    it('the plain New chat goes back to the main list', () => {
+      store.newChatIn(3);
+      store.newChatIn(null);
+      api.createConversation.mockReturnValue(of(conv(10)));
+      store.send('hi').subscribe();
+      expect(api.createConversation).toHaveBeenCalledWith(undefined, undefined, undefined);
+    });
+
+    it('moving a chat puts it in exactly one list and updates both counts', () => {
+      api.listConversations.mockReturnValue(of({ items: [inProject(5, 3)], page: 1, pageSize: 100, totalCount: 1, hasMore: false }));
+      store.loadProjectConversations(3);
+      api.moveConversation.mockReturnValue(of(conv(5, { projectId: null })));
+
+      store.moveToProject(inProject(5, 3), null).subscribe();
+
+      expect(api.moveConversation).toHaveBeenCalledWith(5, null);
+      expect(store.projectConversations()[3]).toEqual([]);
+      expect(store.conversations().map((c) => c.conversationId)).toEqual([5]);
+      expect(projectService.adjustConversationCount).toHaveBeenCalledWith(3, -1);
+    });
+
+    it('pinning or renaming a project chat keeps it in its folder; archiving moves it to the archived list', () => {
+      api.listConversations.mockReturnValue(of({ items: [inProject(5, 3)], page: 1, pageSize: 100, totalCount: 1, hasMore: false }));
+      store.loadProjectConversations(3);
+
+      api.patchConversation.mockReturnValue(of(inProject(5, 3, { isPinned: true })));
+      store.setPinned(inProject(5, 3), true).subscribe();
+      expect(store.conversations()).toEqual([]);
+      expect(store.projectConversations()[3]?.[0]?.isPinned).toBe(true);
+
+      api.patchConversation.mockReturnValue(of(inProject(5, 3, { archivedAt: '2026-10-26T00:00:00Z' })));
+      store.setArchived(inProject(5, 3), true).subscribe();
+      expect(store.projectConversations()[3]).toEqual([]);
+    });
   });
 
   describe('model picker', () => {
@@ -72,7 +133,7 @@ describe('ChatStore', () => {
 
       api.createConversation.mockReturnValue(of(conv(9, { modelId: 'fast' })));
       store.send('hi').subscribe();
-      expect(api.createConversation).toHaveBeenCalledWith(undefined, 'fast');
+      expect(api.createConversation).toHaveBeenCalledWith(undefined, 'fast', undefined);
       expect(store.activeModelId()).toBe('fast');
     });
 

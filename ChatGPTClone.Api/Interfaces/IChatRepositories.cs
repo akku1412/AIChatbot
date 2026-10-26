@@ -7,7 +7,7 @@ namespace ChatGPTClone.Api.Interfaces;
 public interface IConversationRepository
 {
     /// <summary>The main list (pinned first, then most recent) or, with <paramref name="archived"/>, the archived chats.
-    /// Only chats in <paramref name="projectId"/> (null = chats in no project).</summary>
+    /// Only chats in <paramref name="projectId"/>; null = chats in no project (the archived list includes project chats).</summary>
     Task<(List<Conversation> Items, int TotalCount)> ListAsync(int userId, int page, int pageSize, bool archived,
         int? projectId, CancellationToken cancellationToken);
 

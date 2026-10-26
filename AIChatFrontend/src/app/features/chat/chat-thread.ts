@@ -4,6 +4,7 @@ import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http/api-error';
 import { ChatStore } from '../../core/services/chat.store';
+import { ProjectService } from '../../core/services/project.service';
 import { SourcePreviewService } from '../../core/services/source-preview.service';
 import { AppLogo } from '../../shared/components/app-logo/app-logo';
 import { ChatMessageView } from '../../shared/components/chat-message/chat-message';
@@ -26,9 +27,16 @@ export class ChatThread {
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
   private readonly sourcePreview = inject(SourcePreviewService);
+  private readonly projects = inject(ProjectService);
 
   /** Route param (bound by withComponentInputBinding); undefined on /chat. */
   readonly conversationId = input<string>();
+
+  /** A new chat started from a project: shown on the welcome screen so the user knows where it will go. */
+  protected readonly newChatProject = computed(() => {
+    const id = this.store.newChatProject();
+    return id === null || this.conversationId() !== undefined ? null : (this.projects.projects().find((p) => p.projectId === id) ?? null);
+  });
 
   protected readonly draft = signal('');
   protected readonly suggestions: { icon: 'learn' | 'code' | 'plan' | 'write'; title: string; detail: string; prompt: string }[] = [

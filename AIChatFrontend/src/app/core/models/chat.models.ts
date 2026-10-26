@@ -10,7 +10,36 @@ export interface ConversationSummary {
   archivedAt: string | null;
   /** The model picked for this chat (an id from GET /api/models); null = the default model. */
   modelId?: string | null;
+  /** The project this chat belongs to; null = the main list. */
+  projectId?: number | null;
 }
+
+/** GET /api/projects: a folder of chats with shared instructions and files. */
+export interface Project {
+  projectId: number;
+  name: string;
+  instructions: string | null;
+  fileCount: number;
+  conversationCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /api/projects/{id}: the project with its shared files. */
+export interface ProjectDetail {
+  projectId: number;
+  name: string;
+  instructions: string | null;
+  conversationCount: number;
+  files: UploadedFile[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Same limits as the API (Project.NameMaxLength / InstructionsMaxLength / MaxFiles). */
+export const PROJECT_NAME_MAX = 100;
+export const PROJECT_INSTRUCTIONS_MAX = 4000;
+export const PROJECT_MAX_FILES = 20;
 
 /** PATCH /api/conversations/{id}: only the fields present change. */
 export interface ConversationPatch {
@@ -45,6 +74,7 @@ export interface ConversationSearchResult {
   /** Text around the match in the newest matching message, if any. */
   snippet: string | null;
   messageId: number | null;
+  projectId?: number | null;
 }
 
 export interface PagedResult<T> {

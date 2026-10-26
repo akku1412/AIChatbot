@@ -12,7 +12,9 @@ public sealed class ConversationRepository(AppDbContext db) : IConversationRepos
         int? projectId, CancellationToken cancellationToken)
     {
         var query = db.Conversations.AsNoTracking()
-            .Where(c => c.UserId == userId && (archived ? c.ArchivedAt != null : c.ArchivedAt == null) && c.ProjectId == projectId);
+            .Where(c => c.UserId == userId && (archived ? c.ArchivedAt != null : c.ArchivedAt == null))
+            // A project's chats; else the main list (no project). Archived chats are listed together, project or not.
+            .Where(c => projectId != null ? c.ProjectId == projectId : archived || c.ProjectId == null);
         var total = await query.CountAsync(cancellationToken);
         var ordered = archived
             ? query.OrderByDescending(c => c.ArchivedAt).ThenByDescending(c => c.ConversationId)

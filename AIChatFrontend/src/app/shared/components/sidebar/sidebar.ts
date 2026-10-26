@@ -2,7 +2,7 @@ import { Component, DestroyRef, ElementRef, computed, inject, input, output, sig
 import { RouterLink, RouterLinkActive } from '@angular/router';
 
 import { User } from '../../../core/auth/auth.models';
-import { ConversationSearchResult, ConversationSummary } from '../../../core/models/chat.models';
+import { ConversationSearchResult, ConversationSummary, Project } from '../../../core/models/chat.models';
 import { AppLogo } from '../app-logo/app-logo';
 import { LoadingSpinner } from '../loading-spinner/loading-spinner';
 
@@ -24,6 +24,11 @@ export interface PinRequest {
 export interface ArchiveRequest {
   conversation: ConversationSummary;
   archived: boolean;
+}
+
+export interface MoveRequest {
+  conversation: ConversationSummary;
+  projectId: number;
 }
 
 /** A piece of text, marked when it matches the search. */
@@ -156,6 +161,7 @@ export function highlightMatches(text: string, query: string): TextPart[] {
             }
           }
         } @else {
+        <ng-content select="[sidebar-projects]" />
         @for (group of groups(); track group.label) {
           <h2 class="group-label">{{ group.label }}</h2>
           @for (conversation of group.items; track conversation.conversationId) {
@@ -201,6 +207,15 @@ export function highlightMatches(text: string, query: string): TextPart[] {
                       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
                       Rename
                     </button>
+                    @if (projects().length) {
+                      <p class="menu-label" role="presentation">Move to project</p>
+                      @for (project of projects(); track project.projectId) {
+                        <button type="button" role="menuitem" class="indent" (click)="requestMove(conversation, project.projectId)">
+                          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                          <span class="menu-text">{{ project.name }}</span>
+                        </button>
+                      }
+                    }
                     <button type="button" role="menuitem" (click)="requestExport(conversation)">
                       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       Export as TXT
@@ -278,6 +293,8 @@ export class Sidebar {
   /** Archived chats (null = not loaded yet). */
   readonly archived = input<ConversationSummary[] | null>(null);
   readonly archivedLoading = input(false);
+  /** Targets for "Move to project" in each chat's menu. */
+  readonly projects = input<Pick<Project, 'projectId' | 'name'>[]>([]);
 
   /** Debounced search text ("" when cleared). */
   readonly search = output<string>();
@@ -293,6 +310,7 @@ export class Sidebar {
   readonly rename = output<RenameRequest>();
   readonly remove = output<ConversationSummary>();
   readonly exportChat = output<ConversationSummary>();
+  readonly move = output<MoveRequest>();
 
   protected readonly titleMax = TITLE_MAX;
   protected readonly imageFailed = signal(false);
@@ -419,6 +437,11 @@ export class Sidebar {
     event.preventDefault();
     event.stopPropagation();
     this.editingId.set(null);
+  }
+
+  protected requestMove(conversation: ConversationSummary, projectId: number): void {
+    this.closeMenu();
+    this.move.emit({ conversation, projectId });
   }
 
   protected requestExport(conversation: ConversationSummary): void {

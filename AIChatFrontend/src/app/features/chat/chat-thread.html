@@ -12,6 +12,12 @@
         <section class="welcome">
           <app-logo [size]="52" />
           <h2>Hi {{ firstName() }}, how can I help today?</h2>
+          @if (newChatProject(); as project) {
+            <p class="welcome-project">
+              New chat in <a [routerLink]="['/projects', project.projectId]">{{ project.name }}</a>: it follows the project's
+              instructions and can use its files.
+            </p>
+          }
           <p class="welcome-sub">Ask anything, or start with one of these.</p>
           <div class="suggestions">
             @for (suggestion of suggestions; track suggestion.title) {

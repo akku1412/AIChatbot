@@ -1,0 +1,176 @@
+:host {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.page {
+  padding: 32px 16px 48px;
+}
+
+.column {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-head h1 {
+  margin: 0 0 4px;
+  font-size: 1.625rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.page-head p,
+.card p {
+  margin: 0;
+}
+
+.small {
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.field-label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+input[type='text'],
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+input[type='text']:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.count {
+  margin: 4px 0 12px !important;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.count.near {
+  color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.section-head h3 {
+  margin: 0;
+}
+
+/* The "Add files" label wraps a visually hidden file input. */
+.picker {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+label.btn {
+  position: relative;
+}
+
+label.btn:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+label.btn.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.files,
+.chats {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.files li,
+.chats li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chats a {
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chats a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.empty {
+  margin-top: 12px !important;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.loading {
+  display: grid;
+  place-items: center;
+  padding: 64px 0;
+}
+
+@media (max-width: 560px) {
+  .danger-zone,
+  .section-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

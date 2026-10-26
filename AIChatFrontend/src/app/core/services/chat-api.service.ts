@@ -25,9 +25,15 @@ export class ChatApiService {
   private readonly chatUrl = `${environment.apiBaseUrl}/chat`;
   private readonly messagesUrl = `${environment.apiBaseUrl}/messages`;
 
-  /** The main list (pinned first) or, with archived = true, the archived chats. */
-  listConversations(page: number, pageSize: number, archived = false): Observable<PagedResult<ConversationSummary>> {
-    const params = new HttpParams().set('page', page).set('pageSize', pageSize).set('archived', archived);
+  /**
+   * The main list (pinned first; chats in no project), with archived = true all archived chats, or with a
+   * projectId that project's chats.
+   */
+  listConversations(page: number, pageSize: number, archived = false, projectId?: number): Observable<PagedResult<ConversationSummary>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize).set('archived', archived);
+    if (projectId !== undefined) {
+      params = params.set('projectId', projectId);
+    }
     return this.http.get<PagedResult<ConversationSummary>>(this.conversationsUrl, { params });
   }
 
@@ -40,9 +46,18 @@ export class ChatApiService {
     return this.http.get<ConversationSummary>(`${this.conversationsUrl}/${conversationId}`);
   }
 
-  /** modelId: an id from GET /api/models (omitted = the default model). */
-  createConversation(title?: string, modelId?: string): Observable<ConversationSummary> {
-    return this.http.post<ConversationSummary>(this.conversationsUrl, { title: title ?? null, modelId: modelId ?? null });
+  /** modelId: an id from GET /api/models (omitted = the default model); projectId: create it inside that project. */
+  createConversation(title?: string, modelId?: string, projectId?: number): Observable<ConversationSummary> {
+    return this.http.post<ConversationSummary>(this.conversationsUrl, {
+      title: title ?? null,
+      modelId: modelId ?? null,
+      projectId: projectId ?? null,
+    });
+  }
+
+  /** Moves a chat into a project, or back to the main list with null. */
+  moveConversation(conversationId: number, projectId: number | null): Observable<ConversationSummary> {
+    return this.http.put<ConversationSummary>(`${this.conversationsUrl}/${conversationId}/project`, { projectId });
   }
 
   renameConversation(conversationId: number, title: string): Observable<ConversationSummary> {

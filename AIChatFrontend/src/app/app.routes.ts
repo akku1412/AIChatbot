@@ -29,6 +29,11 @@ export const routes: Routes = [
       { path: 'chat', title: 'New chat · AIChat', loadComponent: chatThread },
       { path: 'chat/:conversationId', title: 'AIChat', loadComponent: chatThread },
       {
+        path: 'projects/:projectId',
+        title: 'Project · AIChat',
+        loadComponent: () => import('./features/projects/project-page').then((m) => m.ProjectPage),
+      },
+      {
         path: 'profile',
         title: 'Profile · AIChat',
         loadComponent: () => import('./features/profile/profile').then((m) => m.Profile),

@@ -440,3 +440,25 @@
   background: var(--surface-hover);
   color: var(--text);
 }
+
+/* "Move to project" inside a chat's menu. */
+.menu-label {
+  margin: 6px 10px 2px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.menu .indent {
+  padding-left: 14px;
+}
+
+.menu-text {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

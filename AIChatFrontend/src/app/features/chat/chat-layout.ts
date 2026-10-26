@@ -8,17 +8,19 @@ import { errorMessage } from '../../core/http/api-error';
 import { ConversationSummary } from '../../core/models/chat.models';
 import { ChatApiService } from '../../core/services/chat-api.service';
 import { ChatStore } from '../../core/services/chat.store';
+import { ProjectService } from '../../core/services/project.service';
 import { fileNameFromDisposition, safeFileName, saveBlob } from '../../core/services/download';
 import { AppHeader } from '../../shared/components/app-header/app-header';
 import { ConfirmDialogService } from '../../shared/components/confirm-dialog/confirm-dialog.service';
 import { ModelPicker } from '../../shared/components/model-picker/model-picker';
-import { ArchiveRequest, PinRequest, RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
+import { ProjectsSection } from '../../shared/components/projects-section/projects-section';
+import { ArchiveRequest, MoveRequest, PinRequest, RenameRequest, Sidebar } from '../../shared/components/sidebar/sidebar';
 import { NotificationService } from '../../shared/components/toast/notification.service';
 
 /** Signed-in shell: sidebar (a drawer on small screens) + header + the routed page (chat or profile). */
 @Component({
   selector: 'app-chat-layout',
-  imports: [RouterOutlet, Sidebar, AppHeader, ModelPicker],
+  imports: [RouterOutlet, Sidebar, AppHeader, ModelPicker, ProjectsSection],
   host: { '(document:keydown.escape)': 'closeDrawer()' },
   template: `
     <div class="layout" [class.drawer-open]="drawerOpen()">
@@ -35,6 +37,8 @@ import { NotificationService } from '../../shared/components/toast/notification.
           [searchError]="store.searchError()"
           [archived]="store.archivedConversations()"
           [archivedLoading]="store.archivedLoading()"
+          [projects]="projects.projects()"
+          (move)="move($event)"
           (search)="store.search($event)"
           (pin)="pin($event)"
           (archive)="archive($event)"
@@ -48,7 +52,9 @@ import { NotificationService } from '../../shared/components/toast/notification.
           (remove)="remove($event)"
           (exportChat)="exportChat($event.conversationId)"
           (logout)="logout()"
-        />
+        >
+          <app-projects-section sidebar-projects (selected)="closeDrawer()" />
+        </app-sidebar>
       </aside>
 
       @if (drawerOpen()) {
@@ -76,6 +82,7 @@ import { NotificationService } from '../../shared/components/toast/notification.
 })
 export class ChatLayout {
   protected readonly store = inject(ChatStore);
+  protected readonly projects = inject(ProjectService);
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
@@ -92,17 +99,21 @@ export class ChatLayout {
     { initialValue: this.router.url },
   );
 
+  /** The model picker and export belong to chats, not to the profile or project pages. */
+  protected readonly onChat = computed(() => this.url().startsWith('/chat'));
+
   protected readonly title = computed(() =>
-    this.url().startsWith('/profile') ? 'Profile' : (this.store.activeConversation()?.title ?? 'New chat'),
+    this.url().startsWith('/profile')
+      ? 'Profile'
+      : this.url().startsWith('/projects')
+        ? 'Project'
+        : (this.store.activeConversation()?.title ?? 'New chat'),
   );
 
   /** Export needs a saved conversation with at least one message, and not while a reply is still arriving. */
-  /** The model picker belongs to chats, not to the profile page. */
-  protected readonly onChat = computed(() => !this.url().startsWith('/profile'));
-
   protected readonly canExport = computed(
     () =>
-      !this.url().startsWith('/profile') &&
+      this.onChat() &&
       this.store.activeConversationId() !== null &&
       this.store.messages().some((m) => m.messageId > 0) &&
       !this.store.sending(),
@@ -134,9 +145,17 @@ export class ChatLayout {
   }
 
   protected newChat(): void {
-    this.store.startNewChat();
+    this.store.newChatIn(null); // the plain "New chat" goes to the main list, not the last project
     this.closeDrawer();
     this.router.navigate(['/chat']);
+  }
+
+  protected move({ conversation, projectId }: MoveRequest): void {
+    const project = this.projects.projects().find((p) => p.projectId === projectId);
+    this.store.moveToProject(conversation, projectId).subscribe({
+      next: () => this.notifications.success(`Moved to ${project?.name ?? 'the project'}.`),
+      error: (err: unknown) => this.notifications.error(`Couldn't move the chat. ${errorMessage(err)}`),
+    });
   }
 
   protected closeDrawer(): void {

@@ -50,3 +50,13 @@
   color: #fff;
 }
 
+
+.danger-outline {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.danger-outline:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}

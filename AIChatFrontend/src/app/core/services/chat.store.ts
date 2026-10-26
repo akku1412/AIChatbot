@@ -13,6 +13,7 @@ import {
 } from '../models/chat.models';
 import { ChatApiService } from './chat-api.service';
 import { ModelService } from './model.service';
+import { ProjectService } from './project.service';
 
 const PAGE_SIZE = 20;
 /** Streamed text is applied to the screen at most this often (smooth, and Markdown isn't re-rendered per token). */
@@ -38,6 +39,7 @@ interface TurnView {
 export class ChatStore {
   private readonly api = inject(ChatApiService);
   private readonly models = inject(ModelService);
+  private readonly projects = inject(ProjectService);
 
   // ----- Conversation lists (sidebar) -----
   private readonly conversationList = signal<ConversationSummary[]>([]);
@@ -83,10 +85,59 @@ export class ChatStore {
   readonly activeConversation = computed(() => {
     const id = this.activeConversationId();
     return (
-      [...this.conversationList(), ...(this.archivedList() ?? [])].find((c) => c.conversationId === id) ??
-      (this.openedConversation()?.conversationId === id ? this.openedConversation() : null)
+      [...this.conversationList(), ...(this.archivedList() ?? []), ...Object.values(this.projectLists()).flat()].find(
+        (c) => c.conversationId === id,
+      ) ?? (this.openedConversation()?.conversationId === id ? this.openedConversation() : null)
     );
   });
+
+  // ----- Projects -----
+  /** Loaded chat lists per project id (a project's folder in the sidebar). */
+  private readonly projectLists = signal<Record<number, ConversationSummary[]>>({});
+  readonly projectConversations = this.projectLists.asReadonly();
+  /** The project the next new chat is created in (null = the main list). */
+  private readonly newChatProjectId = signal<number | null>(null);
+  readonly newChatProject = this.newChatProjectId.asReadonly();
+
+  /** Loads a project's chats (not archived, pinned first, then most recent). */
+  loadProjectConversations(projectId: number): void {
+    this.api.listConversations(1, 100, false, projectId).subscribe({
+      next: (page) => this.projectLists.update((lists) => ({ ...lists, [projectId]: sortConversations(page.items) })),
+      error: (err: unknown) => this.listError.set(errorMessage(err)),
+    });
+  }
+
+  /** The next new chat goes into this project (or the main list with null). */
+  newChatIn(projectId: number | null): void {
+    this.newChatProjectId.set(projectId);
+    this.startNewChat();
+  }
+
+  /** Moves a chat into a project, or back to the main list with null. */
+  moveToProject(conversation: ConversationSummary, projectId: number | null): Observable<ConversationSummary> {
+    const from = conversation.projectId ?? null;
+    return this.api.moveConversation(conversation.conversationId, projectId).pipe(
+      tap((updated) => {
+        this.upsert(updated);
+        if (from !== null) {
+          this.projects.adjustConversationCount(from, -1);
+        }
+        if (projectId !== null) {
+          this.projects.adjustConversationCount(projectId, +1);
+        }
+      }),
+    );
+  }
+
+  /** A deleted project's chats moved back to the main list on the server: show that here too. */
+  projectDeleted(projectId: number): void {
+    this.projectLists.update(({ [projectId]: _removed, ...rest }) => rest);
+    this.openedConversation.update((c) => (c?.projectId === projectId ? { ...c, projectId: null } : c));
+    if (this.newChatProjectId() === projectId) {
+      this.newChatProjectId.set(null);
+    }
+    this.loadConversations();
+  }
 
   // ----- Model picker -----
   /** The model picked for the next new chat (sent when the conversation is created). */
@@ -192,6 +243,10 @@ export class ChatStore {
   deleteConversation(conversationId: number): Observable<void> {
     return this.api.deleteConversation(conversationId).pipe(
       tap(() => {
+        const projectId = this.projectIdOf(conversationId);
+        if (projectId !== null) {
+          this.projects.adjustConversationCount(projectId, -1);
+        }
         this.removeFromLists(conversationId);
         if (this.activeConversationId() === conversationId) {
           this.startNewChat();
@@ -210,12 +265,22 @@ export class ChatStore {
     if (this.openedConversation()?.conversationId === id) {
       this.openedConversation.set(conversation);
     }
+    // Each chat is in exactly one list: archived (project or not), its project's folder, or the main list.
+    const without = (list: ConversationSummary[]) => list.filter((c) => c.conversationId !== id);
+    this.projectLists.update((lists) =>
+      Object.fromEntries(Object.entries(lists).map(([projectId, list]) => [projectId, without(list)])),
+    );
     if (conversation.archivedAt) {
-      this.conversationList.update((list) => list.filter((c) => c.conversationId !== id));
-      this.archivedList.update((list) => (list ? [conversation, ...list.filter((c) => c.conversationId !== id)] : list));
+      this.conversationList.update(without);
+      this.archivedList.update((list) => (list ? [conversation, ...without(list)] : list));
+    } else if (conversation.projectId != null) {
+      const projectId = conversation.projectId;
+      this.conversationList.update(without);
+      this.archivedList.update((list) => (list ? without(list) : null));
+      this.projectLists.update((lists) => ({ ...lists, [projectId]: sortConversations([conversation, ...(lists[projectId] ?? [])]) }));
     } else {
-      this.archivedList.update((list) => list?.filter((c) => c.conversationId !== id) ?? null);
-      this.conversationList.update((list) => sortConversations([conversation, ...list.filter((c) => c.conversationId !== id)]));
+      this.archivedList.update((list) => (list ? without(list) : null));
+      this.conversationList.update((list) => sortConversations([conversation, ...without(list)]));
     }
     this.searchResults.update((results) =>
       results?.map((r) => (r.conversationId === id ? { ...r, title: conversation.title, isPinned: conversation.isPinned, archivedAt: conversation.archivedAt } : r)) ??
@@ -223,7 +288,20 @@ export class ChatStore {
     );
   }
 
+  private projectIdOf(conversationId: number): number | null {
+    for (const [projectId, list] of Object.entries(this.projectLists())) {
+      if (list.some((c) => c.conversationId === conversationId)) {
+        return Number(projectId);
+      }
+    }
+    const opened = this.openedConversation();
+    return opened?.conversationId === conversationId ? (opened.projectId ?? null) : null;
+  }
+
   private removeFromLists(conversationId: number): void {
+    this.projectLists.update((lists) =>
+      Object.fromEntries(Object.entries(lists).map(([projectId, list]) => [projectId, list.filter((c) => c.conversationId !== conversationId)])),
+    );
     this.conversationList.update((list) => list.filter((c) => c.conversationId !== conversationId));
     this.archivedList.update((list) => list?.filter((c) => c.conversationId !== conversationId) ?? null);
     this.searchResults.update((results) => results?.filter((r) => r.conversationId !== conversationId) ?? null);
@@ -310,10 +388,13 @@ export class ChatStore {
     let createdId: number | null = null;
     const conversationId$ = existingId
       ? of(existingId)
-      : this.api.createConversation(undefined, this.newChatModelId() ?? undefined).pipe(
+      : this.api.createConversation(undefined, this.newChatModelId() ?? undefined, this.newChatProjectId() ?? undefined).pipe(
           tap((conversation) => {
             createdId = conversation.conversationId;
-            this.conversationList.update((list) => sortConversations([conversation, ...list]));
+            this.upsert(conversation); // into the main list or its project's folder
+            if (conversation.projectId != null) {
+              this.projects.adjustConversationCount(conversation.projectId, +1);
+            }
             this.activeConversationId.set(conversation.conversationId);
           }),
           map((conversation) => conversation.conversationId),
@@ -557,6 +638,9 @@ export class ChatStore {
     this.activeStream?.abort(false);
     this.conversationList.set([]);
     this.archivedList.set(null);
+    this.projectLists.set({});
+    this.newChatProjectId.set(null);
+    this.projects.reset();
     this.searchSubscription?.unsubscribe();
     this.searchResults.set(null);
     this.loadedPage = 0;

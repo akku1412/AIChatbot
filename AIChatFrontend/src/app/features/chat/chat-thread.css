@@ -188,3 +188,19 @@
 .unanswered .link:hover {
   text-decoration: underline;
 }
+
+/* "New chat in <project>" on the welcome screen. */
+.welcome-project {
+  margin: 0 0 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.welcome-project a {
+  color: var(--accent);
+  font-weight: 600;
+}
