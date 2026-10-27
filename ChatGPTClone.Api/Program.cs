@@ -343,12 +343,33 @@ builder.Services.AddSwaggerGen(o =>
     o.AddSecurityRequirement(new OpenApiSecurityRequirement { [bearer] = [] });
 });
 
+// ---------- Behind proxies (Render, and Vercel forwarding /api) ----------
+// Without this every request looks like it comes from the proxy: per-IP rate limits would be shared by all users.
+// ForwardLimit = proxies in front of the app (Vercel → Render's load balancer = 2). Off unless enabled (the Dockerfile does).
+var forwardedHeaders = builder.Configuration.GetValue<bool>("ForwardedHeaders:Enabled");
+if (forwardedHeaders)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+            | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        o.ForwardLimit = builder.Configuration.GetValue("ForwardedHeaders:ForwardLimit", 2);
+        // The hosting provider's proxy addresses aren't fixed or published.
+        o.KnownNetworks.Clear();
+        o.KnownProxies.Clear();
+    });
+}
+
 var app = builder.Build();
 
 // A wrong Ai:Models / Ai:DefaultModel should stop startup, not fail a user's first message.
 app.Services.GetRequiredService<IAiModelCatalog>();
 
 // ---------- HTTP pipeline (order matters) ----------
+if (forwardedHeaders)
+{
+    app.UseForwardedHeaders();
+}
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 

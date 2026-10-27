@@ -23,7 +23,8 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next, IWebHostEnvi
         headers.XContentTypeOptions = "nosniff";
         headers.XFrameOptions = "DENY";
         headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+        // Voice input records from this site only.
+        headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()";
         // Google Sign-In's popup needs to talk back to this window.
         headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups";
 

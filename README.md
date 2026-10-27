@@ -318,3 +318,51 @@ Deploy:
 6. Behind a load balancer/proxy, configure forwarded headers so rate limiting sees real client IPs.
 
 Security headers (CSP, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`) are added by `SecurityHeadersMiddleware`.
+
+## Free deployment (Vercel + Render)
+
+The Angular app goes on Vercel; Vercel forwards `/api/*` to the API on Render, so the browser still sees one site
+(the SameSite=Strict refresh cookie and `apiBaseUrl: '/api'` keep working, no CORS needed). The database is a
+hosted SQL Server (e.g. the Azure SQL Database free offer).
+
+**1. Database.** Create the database, then apply every migration with an idempotent script:
+
+```
+cd ChatGPTClone.Api
+dotnet ef migrations script --idempotent -o migrate.sql
+```
+
+Run `migrate.sql` against the new database (Azure portal query editor, SSMS or Azure Data Studio).
+
+**2. API on Render.** New → Web Service → this GitHub repo:
+
+- Root directory `ChatGPTClone.Api`, runtime **Docker** (uses `ChatGPTClone.Api/Dockerfile`), instance type Free.
+- Health check path `/api/health`.
+- Environment variables (secrets only here, never in git):
+
+```
+ConnectionStrings__DefaultConnection=Server=tcp:<server>.database.windows.net,1433;Database=<db>;User ID=<user>;Password=<password>;Encrypt=True;
+Jwt__SigningKey=<base64 of 64 random bytes>      Otp__HashKey=<base64 of 32 random bytes>
+Smtp__Username=...   Smtp__Password=<Gmail app password>   Smtp__FromEmail=...
+Ai__Provider=Groq    Ai__Groq__ApiKey=...
+Admin__Emails__0=<your email>
+Embeddings__Provider=None                        (512 MB RAM: keyword search instead of the ONNX model)
+ForwardedHeaders__ForwardLimit=2                 (Vercel + Render's load balancer)
+```
+
+Generate the keys in PowerShell: `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(64))`
+(32 for `Otp__HashKey`). Copy any other non-default settings from your user secrets (`dotnet user-secrets list`),
+e.g. `WebSearch__ApiKey`, Google sign-in and the AI model list.
+
+**3. Frontend on Vercel.** New Project → the same repo:
+
+- Root directory `AIChatFrontend` (settings come from `AIChatFrontend/vercel.json`).
+- Before deploying, put the Render URL in `vercel.json` (`REPLACE-WITH-YOUR-RENDER-SERVICE`) and commit it.
+
+**4. Google sign-in.** Add the Vercel URL (e.g. `https://aichat.vercel.app`) to the OAuth client's
+*Authorized JavaScript origins*.
+
+**Free-tier limits.** Render's free service sleeps after 15 minutes without requests (the next one takes about a
+minute) and its disk is temporary: uploaded files are lost on restart or redeploy unless `FileStorage__Provider` points
+at Azure Blob or S3. ClamAV isn't available, so keep `MalwareScan__Enabled=false`. Streaming replies pass through
+Vercel's forwarding; check them after the first deploy.
