@@ -1,0 +1,64 @@
+# Render Blueprint: Render → New → Blueprint → this repo creates the API service with these settings.
+# Values marked sync: false are asked for once in the Render dashboard (secrets never go in git).
+services:
+  - type: web
+    name: aichatbot-api
+    runtime: docker
+    plan: free
+    rootDir: ChatGPTClone.Api
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ConnectionStrings__DefaultConnection
+        sync: false
+      - key: Jwt__SigningKey
+        sync: false
+      - key: Otp__HashKey
+        sync: false
+      - key: Smtp__Username
+        sync: false
+      - key: Smtp__Password
+        sync: false
+      - key: Smtp__FromEmail
+        sync: false
+      - key: Ai__Groq__ApiKey
+        sync: false
+      - key: Admin__Emails__0
+        sync: false
+      - key: Ai__Provider
+        value: Groq
+      - key: Ai__DefaultModel
+        value: smart
+      - key: Ai__Models__0__Id
+        value: fast
+      - key: Ai__Models__0__Label
+        value: Fast
+      - key: Ai__Models__0__Description
+        value: Quick answers for everyday questions
+      - key: Ai__Models__0__Provider
+        value: Groq
+      - key: Ai__Models__0__Model
+        value: llama-3.1-8b-instant
+      - key: Ai__Models__1__Id
+        value: smart
+      - key: Ai__Models__1__Label
+        value: Smart
+      - key: Ai__Models__1__Description
+        value: Better at reasoning, code and documents
+      - key: Ai__Models__1__Provider
+        value: Groq
+      - key: Ai__Models__1__Model
+        value: openai/gpt-oss-120b
+      - key: Ai__Models__1__ReasoningEffort
+        value: low
+      - key: Ai__Transcription__Provider
+        value: Groq
+      - key: Ai__Transcription__Model
+        value: whisper-large-v3-turbo
+      # 512 MB RAM on the free plan: keyword search instead of the ONNX embedding model.
+      - key: Embeddings__Provider
+        value: None
+      # Vercel (forwarding /api) + Render's load balancer.
+      - key: ForwardedHeaders__ForwardLimit
+        value: "2"
