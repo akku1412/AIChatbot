@@ -4,8 +4,21 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace ChatGPTClone.Api.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+/// <summary>
+/// The SQL Server model (Data/Migrations). PostgreSQL uses <see cref="Postgres.PostgresAppDbContext"/>, the same model
+/// with its own migrations, chosen by "Database:Provider".
+/// </summary>
+public class AppDbContext : DbContext
 {
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
+    /// <summary>For provider-specific subclasses, which carry their own options type.</summary>
+    protected AppDbContext(DbContextOptions options) : base(options)
+    {
+    }
+
     public DbSet<User> Users => Set<User>();
     public DbSet<OtpVerification> OtpVerifications => Set<OtpVerification>();
     public DbSet<Conversation> Conversations => Set<Conversation>();

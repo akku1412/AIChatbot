@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using ChatGPTClone.Api.Authentication;
 using ChatGPTClone.Api.Configuration;
 using ChatGPTClone.Api.Data;
+using ChatGPTClone.Api.Data.Postgres;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Repositories;
@@ -37,13 +38,28 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "or the ConnectionStrings__DefaultConnection environment variable (production).");
 }
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(connectionString, sql =>
-    {
-        // SQL Server 2016 = compatibility level 130. Keeps EF from generating newer T-SQL.
-        sql.UseCompatibilityLevel(130);
-        sql.EnableRetryOnFailure(maxRetryCount: 3);
-    }));
+// "Database:Provider": SqlServer (default; local development) or PostgreSQL (e.g. Render's free database).
+// Each has its own migrations; the rest of the app only ever sees AppDbContext.
+var databaseProvider = builder.Configuration["Database:Provider"] ?? DatabaseProviders.SqlServer;
+switch (databaseProvider)
+{
+    case DatabaseProviders.SqlServer:
+        builder.Services.AddDbContext<AppDbContext>(options =>
+            options.UseSqlServer(connectionString, sql =>
+            {
+                // SQL Server 2016 = compatibility level 130. Keeps EF from generating newer T-SQL.
+                sql.UseCompatibilityLevel(130);
+                sql.EnableRetryOnFailure(maxRetryCount: 3);
+            }));
+        break;
+    case DatabaseProviders.PostgreSql:
+        builder.Services.AddDbContext<AppDbContext, PostgresAppDbContext>(options =>
+            options.UseNpgsql(DatabaseProviders.ToNpgsqlConnectionString(connectionString),
+                npgsql => npgsql.EnableRetryOnFailure(maxRetryCount: 3)));
+        break;
+    default:
+        throw new InvalidOperationException($"Database:Provider '{databaseProvider}' is not supported (use SqlServer or PostgreSQL).");
+}
 
 // ---------- Options (validated at startup so missing secrets fail fast with a clear message) ----------
 builder.Services.AddOptions<GoogleAuthOptions>()
@@ -364,6 +380,14 @@ var app = builder.Build();
 
 // A wrong Ai:Models / Ai:DefaultModel should stop startup, not fail a user's first message.
 app.Services.GetRequiredService<IAiModelCatalog>();
+
+// Hosts without a deploy step for SQL scripts (Render): bring the database up to date on startup. Migrations are
+// additive and idempotent, so a restart is harmless.
+if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
+{
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.MigrateAsync();
+}
 
 // ---------- HTTP pipeline (order matters) ----------
 if (forwardedHeaders)

@@ -322,47 +322,45 @@ Security headers (CSP, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`) ar
 ## Free deployment (Vercel + Render)
 
 The Angular app goes on Vercel; Vercel forwards `/api/*` to the API on Render, so the browser still sees one site
-(the SameSite=Strict refresh cookie and `apiBaseUrl: '/api'` keep working, no CORS needed). The database is a
-hosted SQL Server (e.g. the Azure SQL Database free offer).
+(the SameSite=Strict refresh cookie and `apiBaseUrl: '/api'` keep working, no CORS needed). The database is Render's
+free PostgreSQL. The app supports both databases: `Database:Provider` = `SqlServer` (default, local development) or
+`PostgreSQL`, each with its own migrations (`Data/Migrations`, `Data/Postgres/Migrations`).
 
-**1. Database.** Create the database, then apply every migration with an idempotent script:
+**1. Database and API on Render.** Render → New → **Blueprint** → this GitHub repo. `render.yaml` creates:
 
-```
-cd ChatGPTClone.Api
-dotnet ef migrations script --idempotent -o migrate.sql
-```
+- `aichatbot-db`: free PostgreSQL. Its connection string is passed to the API automatically.
+- `aichatbot-api`: the API from `ChatGPTClone.Api/Dockerfile` (free instance, health check `/api/health`), with
+  `Database__MigrateOnStartup=true`, so the tables are created on the first start.
 
-Run `migrate.sql` against the new database (Azure portal query editor, SSMS or Azure Data Studio).
+Render then asks for the secrets (never in git): `Jwt__SigningKey`, `Otp__HashKey`, `Smtp__Username`,
+`Smtp__Password` (Gmail app password), `Smtp__FromEmail`, `Ai__Groq__ApiKey` and `Admin__Emails__0`. Generate the keys
+in Windows PowerShell:
 
-**2. API on Render.** New → Web Service → this GitHub repo:
-
-- Root directory `ChatGPTClone.Api`, runtime **Docker** (uses `ChatGPTClone.Api/Dockerfile`), instance type Free.
-- Health check path `/api/health`.
-- Environment variables (secrets only here, never in git):
-
-```
-ConnectionStrings__DefaultConnection=Server=tcp:<server>.database.windows.net,1433;Database=<db>;User ID=<user>;Password=<password>;Encrypt=True;
-Jwt__SigningKey=<base64 of 64 random bytes>      Otp__HashKey=<base64 of 32 random bytes>
-Smtp__Username=...   Smtp__Password=<Gmail app password>   Smtp__FromEmail=...
-Ai__Provider=Groq    Ai__Groq__ApiKey=...
-Admin__Emails__0=<your email>
-Embeddings__Provider=None                        (512 MB RAM: keyword search instead of the ONNX model)
-ForwardedHeaders__ForwardLimit=2                 (Vercel + Render's load balancer)
+```powershell
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$b = New-Object byte[] 64; $rng.GetBytes($b); [Convert]::ToBase64String($b)   # Jwt__SigningKey
+$b = New-Object byte[] 32; $rng.GetBytes($b); [Convert]::ToBase64String($b)   # Otp__HashKey
 ```
 
-Generate the keys in PowerShell: `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(64))`
-(32 for `Otp__HashKey`). Copy any other non-default settings from your user secrets (`dotnet user-secrets list`),
-e.g. `WebSearch__ApiKey`, Google sign-in and the AI model list.
+**2. Frontend on Vercel.** New Project → the same repo, root directory `AIChatFrontend` (settings come from
+`AIChatFrontend/vercel.json`). Put the Render API URL in `vercel.json` (the `/api` rewrite) and commit it.
 
-**3. Frontend on Vercel.** New Project → the same repo:
+**3. Google sign-in.** Add the Vercel URL to the OAuth client's *Authorized JavaScript origins*.
 
-- Root directory `AIChatFrontend` (settings come from `AIChatFrontend/vercel.json`).
-- Before deploying, put the Render URL in `vercel.json` (`REPLACE-WITH-YOUR-RENDER-SERVICE`) and commit it.
+**Free-tier limits.** Render's free PostgreSQL expires 30 days after creation unless upgraded. The free web service
+sleeps after 15 minutes without requests (the next one takes about a minute), and its disk is temporary: uploaded
+files are lost on restart or redeploy unless `FileStorage__Provider` points at Azure Blob or S3. ClamAV isn't
+available, so keep `MalwareScan__Enabled=false`. Streaming replies pass through Vercel's forwarding; check them after
+the first deploy.
 
-**4. Google sign-in.** Add the Vercel URL (e.g. `https://aichat.vercel.app`) to the OAuth client's
-*Authorized JavaScript origins*.
+**Testing against PostgreSQL.** The whole test suite runs on either database:
 
-**Free-tier limits.** Render's free service sleeps after 15 minutes without requests (the next one takes about a
-minute) and its disk is temporary: uploaded files are lost on restart or redeploy unless `FileStorage__Provider` points
-at Azure Blob or S3. ClamAV isn't available, so keep `MalwareScan__Enabled=false`. Streaming replies pass through
-Vercel's forwarding; check them after the first deploy.
+```
+docker run -d --name aichat-pg -e POSTGRES_USER=aichat -e POSTGRES_PASSWORD=localtest -p 55432:5432 postgres:16-alpine
+$env:CHATGPTCLONE_TEST_PROVIDER = "PostgreSQL"
+$env:CHATGPTCLONE_TEST_DB = "Host=localhost;Port=55432;Database=chatgptclone_tests;Username=aichat;Password=localtest"
+dotnet test ChatGPTClone.Api.Tests
+```
+
+New migrations are added for both: `dotnet ef migrations add <Name> --context AppDbContext` and
+`dotnet ef migrations add <Name> --context PostgresAppDbContext -o Data/Postgres/Migrations`.

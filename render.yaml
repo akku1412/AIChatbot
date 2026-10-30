@@ -1,5 +1,12 @@
-# Render Blueprint: Render → New → Blueprint → this repo creates the API service with these settings.
+# Render Blueprint: Render → New → Blueprint → this repo creates the database and the API service with these settings.
 # Values marked sync: false are asked for once in the Render dashboard (secrets never go in git).
+databases:
+  # Render's free PostgreSQL (1 GB). Note: free databases expire 30 days after creation unless upgraded.
+  - name: aichatbot-db
+    plan: free
+    databaseName: aichat
+    user: aichat
+
 services:
   - type: web
     name: aichatbot-api
@@ -10,8 +17,16 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      # The database above (Render's postgresql:// URL is converted for Npgsql by the app).
       - key: ConnectionStrings__DefaultConnection
-        sync: false
+        fromDatabase:
+          name: aichatbot-db
+          property: connectionString
+      - key: Database__Provider
+        value: PostgreSQL
+      # Creates and updates the tables on startup (no SQL script to run by hand).
+      - key: Database__MigrateOnStartup
+        value: "true"
       - key: Jwt__SigningKey
         sync: false
       - key: Otp__HashKey

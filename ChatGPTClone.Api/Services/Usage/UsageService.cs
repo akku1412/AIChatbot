@@ -70,6 +70,22 @@ public sealed class UsageService(AppDbContext db, IOptions<UsageOptions> options
     public async Task RecordAsync(int userId, UsageDelta delta, CancellationToken cancellationToken)
     {
         var today = Today(time);
+        if (db.IsPostgres())
+        {
+            // One atomic statement: ON CONFLICT turns the second first-request of the day into an update.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "UsageDaily" ("UserId", "Date", "MessageCount", "InputTokens", "OutputTokens", "UploadCount", "UploadBytes")
+                VALUES ({userId}, {DateOnly.FromDateTime(today)}, {delta.Messages}, {delta.InputTokens}, {delta.OutputTokens}, {delta.Uploads}, {delta.UploadBytes})
+                ON CONFLICT ("UserId", "Date") DO UPDATE SET
+                    "MessageCount" = "UsageDaily"."MessageCount" + EXCLUDED."MessageCount",
+                    "InputTokens" = "UsageDaily"."InputTokens" + EXCLUDED."InputTokens",
+                    "OutputTokens" = "UsageDaily"."OutputTokens" + EXCLUDED."OutputTokens",
+                    "UploadCount" = "UsageDaily"."UploadCount" + EXCLUDED."UploadCount",
+                    "UploadBytes" = "UsageDaily"."UploadBytes" + EXCLUDED."UploadBytes"
+                """, cancellationToken);
+            return;
+        }
+
         // One atomic statement: HOLDLOCK keeps two first requests of the day from both inserting.
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             MERGE [UsageDaily] WITH (HOLDLOCK) AS t

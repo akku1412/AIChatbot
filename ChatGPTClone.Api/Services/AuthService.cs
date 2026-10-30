@@ -6,7 +6,7 @@ using ChatGPTClone.Api.DTOs.Users;
 using ChatGPTClone.Api.Interfaces;
 using ChatGPTClone.Api.Middleware;
 using ChatGPTClone.Api.Models;
-using Microsoft.Data.SqlClient;
+using ChatGPTClone.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -230,7 +230,7 @@ public sealed class AuthService(
             await userRepository.SaveChangesAsync(cancellationToken);
             return true;
         }
-        catch (DbUpdateException ex) when (ex.InnerException is SqlException { Number: 2601 or 2627 })
+        catch (DbUpdateException ex) when (DatabaseProviders.IsUniqueViolation(ex))
         {
             userRepository.DiscardPendingChanges();
             return false;

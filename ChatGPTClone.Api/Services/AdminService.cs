@@ -44,8 +44,9 @@ public sealed class AdminService(
         var users = db.Users.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim();
-            users = users.Where(u => u.Email.Contains(term) || u.FullName.Contains(term));
+            // Case-insensitive on both databases (PostgreSQL compares case-sensitively).
+            var term = search.Trim().ToLowerInvariant();
+            users = users.Where(u => u.Email.ToLower().Contains(term) || u.FullName.ToLower().Contains(term));
         }
 
         var total = await users.CountAsync(cancellationToken);

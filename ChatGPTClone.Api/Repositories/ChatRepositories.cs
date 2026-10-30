@@ -29,17 +29,18 @@ public sealed class ConversationRepository(AppDbContext db) : IConversationRepos
     public async Task<List<(Conversation Conversation, long? MatchingMessageId)>> SearchAsync(int userId, string term, int limit,
         CancellationToken cancellationToken)
     {
-        // LIKE with the wildcards in the user's text escaped, so "50%" or "a_b" are searched literally.
-        var pattern = "%" + term.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_").Replace("[", @"\[") + "%";
+        // LIKE with the wildcards in the user's text escaped, so "50%" or "a_b" are searched literally. Both sides are
+        // lower-cased: SQL Server ignores case anyway, PostgreSQL's LIKE doesn't.
+        var pattern = "%" + term.ToLowerInvariant().Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_").Replace("[", @"\[") + "%";
         var rows = await db.Conversations.AsNoTracking()
             .Where(c => c.UserId == userId)
             .Select(c => new
             {
                 Conversation = c,
                 MatchingMessageId = c.Messages
-                    .Where(m => m.Role != MessageRole.System && EF.Functions.Like(m.Content, pattern, @"\"))
+                    .Where(m => m.Role != MessageRole.System && EF.Functions.Like(m.Content.ToLower(), pattern, @"\"))
                     .Max(m => (long?)m.MessageId),
-                TitleMatches = EF.Functions.Like(c.Title, pattern, @"\"),
+                TitleMatches = EF.Functions.Like(c.Title.ToLower(), pattern, @"\"),
             })
             .Where(x => x.TitleMatches || x.MatchingMessageId != null)
             .OrderByDescending(x => x.Conversation.IsPinned)

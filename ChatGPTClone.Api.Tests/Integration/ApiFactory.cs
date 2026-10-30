@@ -33,6 +33,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     /// <summary>Listed in Admin:Emails, so signing in with it makes the account an admin.</summary>
     public const string AdminEmail = "admin@example.test";
 
+    /// <summary>SqlServer (default) or PostgreSQL: the whole suite runs against either database.</summary>
+    private static readonly string Provider = Environment.GetEnvironmentVariable("CHATGPTCLONE_TEST_PROVIDER") ?? "SqlServer";
+
     private static readonly string ConnectionString =
         Environment.GetEnvironmentVariable("CHATGPTCLONE_TEST_DB")
         ?? $@"Server=AKANSHA\SQL2016;Database={TestDatabase};Trusted_Connection=True;TrustServerCertificate=True";
@@ -56,6 +59,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:DefaultConnection", ConnectionString);
+        builder.UseSetting("Database:Provider", Provider);
         builder.UseSetting("Jwt:SigningKey", Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)));
         builder.UseSetting("Otp:HashKey", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
         builder.UseSetting("Otp:MaxSendsPerHour", "100");
